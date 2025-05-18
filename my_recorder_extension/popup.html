@@ -1,0 +1,20 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>Recorder</title>
+    <style>
+      body { font-family: Arial, sans-serif; margin: 10px; }
+      button { margin-top: 10px; }
+    </style>
+  </head>
+  <body>
+    <h3>Recorded Events</h3>
+    <button id="toggle-recording">Start Recording</button>
+    <button id="download">Download JSON</button>
+    <button id="clear">Clear Events</button>
+    <button id="suggest-inputs">Suggest Input Values</button>
+    <pre id="count"></pre>
+    <script src="jszip.min.js"></script>
+    <script src="popup.js"></script>
+  </body>
+</html>

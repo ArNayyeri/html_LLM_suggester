@@ -80,11 +80,8 @@ A typical response from `/suggest_inputs`:
 - `my_recorder_extension/` — Chrome extension for recording web page data.
 - `snapshots/` — Saved HTML/CSS/events and LLM suggestions.
 
-## License
-MIT
 
 ## Acknowledgements
 - [Ollama](https://ollama.com/)
 - [OpenRouter](https://openrouter.ai/)
-- [Together API](https://www.together.ai/)
 - [OpenAI Python SDK](https://github.com/openai/openai-python)

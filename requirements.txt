@@ -4,4 +4,3 @@ pydantic
 bs4
 openai
 ollama
-together

@@ -5,7 +5,7 @@ A smart web form analyzer and input suggester using LLMs (Large Language Models)
 ## Overview
 This project provides a Flask-based backend server and a browser extension to:
 - Record HTML/CSS snapshots and user events from web pages.
-- Analyze web forms using LLMs (Ollama, OpenRouter, or Together API).
+- Analyze web forms using LLMs (Ollama or OpenRouter).
 - Suggest valid input values and ranges for form fields, in Persian, based on the HTML structure.
 - Save and update suggestions for further testing or automation.
 
@@ -37,7 +37,7 @@ This project provides a Flask-based backend server and a browser extension to:
    ```sh
    pip install -r requirements.txt
    ```
-   (You may need to manually install: `flask`, `flask-cors`, `pydantic`, `bs4`, `openai`, `ollama`, `together`)
+   (You may need to manually install: `flask`, `flask-cors`, `pydantic`, `bs4`, `openai`, `ollama`)
 
 3. **(Optional) Set up Ollama or get an OpenRouter API key.**
 

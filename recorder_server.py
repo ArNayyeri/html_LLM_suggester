@@ -6,6 +6,33 @@ import re
 from ollama import chat
 import time
 import uuid
+from pydantic import BaseModel, Field
+from bs4 import BeautifulSoup
+from openai import OpenAI
+
+
+ollama_url = 'http://localhost:11434/v1'
+openrouter_url = 'https://openrouter.ai/api/v1'
+
+site = input(
+    "Do you want to use local or api? (local/api): "
+).strip().lower()
+
+if site == 'local':
+    token = 'ollama'
+    url = ollama_url
+    model_name = 'llama3.1'
+    is_local = True
+
+elif site == 'api':
+    token = input("Enter your OpenRouter API token: ").strip()
+    url = openrouter_url
+    model_name = 'meta-llama/llama-3.3-8b-instruct:free'
+    is_local = False
+
+else:
+    print("Invalid input. Please enter 'local' or 'api'.")
+    exit(1)
 
 app = Flask(__name__)
 CORS(app)
@@ -17,6 +44,26 @@ _run_uid = uuid.uuid4().hex[:8]
 RUN_ID = f"run_{_run_time}_{_run_uid}"
 RUN_SAVE_DIR = os.path.join(SAVE_DIR, RUN_ID)
 os.makedirs(RUN_SAVE_DIR, exist_ok=True)
+
+client = OpenAI(
+    base_url=url,
+    api_key=token)
+
+
+class FormField(BaseModel):
+    name: str = Field(...,
+                      description="The 'name' attribute of the input or textarea")
+    id: str = Field(..., description="The 'id' attribute of the element")
+    type: str = Field(...,
+                      description="Input type (text, password, etc.) or 'textarea'")
+    limitations: str = Field(
+        ..., description="Validation rules inferred from attributes like minlength, maxlength, pattern, placeholder")
+    examples: list[str] = Field(...,
+                                description="Two example values that satisfy the limitations")
+
+
+class FormSchema(BaseModel):
+    fields: list[FormField]
 
 
 @app.route('/snapshot', methods=['POST'])
@@ -45,33 +92,54 @@ def snapshot():
 
 
 def suggest_input_values(html):
+    soup = BeautifulSoup(html, 'html.parser')
 
-    messages = [{'role': 'system', 'content': '''شما یک تستر هوشمند هستید.
+    # Find all <input> and <textarea> elements
+    elements = soup.find_all(['input', 'textarea'])
 
-من در ادامه یک کد HTML کامل از یک صفحه وب را برایتان ارسال می‌کنم. لطفاً مراحل زیر را انجام دهید:
+    # Extract IDs (only if they exist)
+    ids = [el['id'] for el in elements if 'id' in el.attrs]
+    # print(f"Found IDs: {ids}")
 
-1. تمامی فیلدهای ورودی (input, textarea, select) را استخراج کن.
-2. برای هر فیلد، اطلاعات زیر را تولید کن:
-   - `نام فیلد (name یا id)`
-   - `نوع فیلد` (مثلاً: text, email, password, number, date, etc)
-   - `برچسب و توضیحات موجود در HTML` (label یا placeholder یا متن اطراف)
-   - `رینج و فرمت معتبر ورودی برای این فیلد براساس فهم تو از این ورودی` (مثلاً فقط عدد ۱ تا ۵، یا ایمیل معتبر، یا تاریخ YYYY-MM-DD)(حتما ساخته شود)
-   - `۵ مثال مناسب برای مقداردهی تستی`(حتما باید ساخته شود)
+    # Build the prompt for structured extraction
+    system_msg = {
+        "role": "system",
+        "content": (
+            "شما یک پارسر HTML هستید. HTML زیر را دریافت می‌کنید و فقط عناصری که id آن‌ها در لیست مشخص‌شده است را پردازش می‌کنید. "
+            "برای هر عنصر، یک شی JSON با کلیدهای name، id، type، limitations و examples بسازید. "
+            "- name: مقدار attribute 'name'. "
+            "- id: مقدار attribute 'id'. "
+            "- type: نوع input (text، password و غیره) یا 'textarea'. "
+            "- limitations: قواعد اعتبارسنجی استخراج‌شده از attributes مانند minlength، maxlength، pattern یا placeholder. (مثل 'حداقل دارای 8 حرف انگلیسی')"
+            "- examples: 5 مقدار مثال که با این محدودیت‌ها مطابقت داشته باشند. "
+            "لطفاً کلیدها را ثابت نگه دارید ولی مقادیر محدودیت ها را به زبان فارسی بنویسید. "
+            "خروجی را به صورت یک شی JSON مطابق با schema پایدانتیک و هیچ متن اضافی ندهید. "
+            f"فقط این id ها را پردازش کن: {', '.join(ids)}"
+        )
+    }
 
-لطفاً خروجی به ازای هر فیلد ایجاد کن و آن را فقط به صورت یک JSON به فرمت زیر نمایش بده تا قابل خواندن و پردازش باشد.
-[{name:"", id:"", type:"", range:"", examples:["","",...]},{name:"", id:"", type:"", range:"", examples:["","",...]}, ...]
- '''}, {'role': 'user', 'content': f'''این صفحه وب است:
-        {html}
-        خروجی مورد نظر را به من بده.'''}]
+    user_msg = {"role": "user", "content": html}
 
-    try:
-        response = chat(model="llama3.1", messages=messages, options={
-            'num_ctx': 32768  # Use full context window
-        })
-        return response['message']['content']
-    except Exception as e:
-        print(f"Error querying Ollama for input suggestions: {e}")
-        return json.dumps({'error': str(e)})
+    # Call the LLM with the JSON schema
+    if is_local:
+        response = chat(model="llama3.1",
+                        messages=[system_msg, user_msg],
+                        format=FormSchema.model_json_schema(),
+                        options={"num_ctx": 32768}
+                        )
+        raw = response['message']['content']
+    else:
+        response = client.beta.chat.completions.parse(
+            model=model_name,
+            messages=[system_msg, user_msg],
+            response_format=FormSchema,
+        )
+        raw = response.choices[0].message.content
+
+    # Parse the structured JSON content
+    data = json.loads(raw)
+    # print(f"Parsed JSON: {data}")
+    return data
 
 
 @app.route('/events', methods=['POST'])
@@ -89,44 +157,28 @@ def events():
 @app.route('/suggest_inputs', methods=['POST'])
 def suggest_inputs():
     print("Received suggest_inputs request")
+    run_time_temp = int(time.time())
     data = request.get_json()
     html = data.get('html', '')
+    with open(os.path.join(RUN_SAVE_DIR, f'html_suggest_inputs_{run_time_temp}.html'), 'w', encoding='utf-8') as f:
+        f.write(html)
+    # return (f"HTML length: {len(html)}")
     try:
         result = suggest_input_values(html)
-        with open(os.path.join(RUN_SAVE_DIR, 'suggested_inputs.json'), 'w', encoding='utf-8') as f:
-            f.write(result)
-        # extract the JSON part from the response
-        try:
-            # Try to parse the result as JSON directly
-            parsed = json.loads(result)
-            return (
-                json.dumps(parsed, ensure_ascii=False, indent=2),
-                200,
-                {'Content-Type': 'application/json'}
-            )
-        except Exception:
-            # If the LLM response is not pure JSON, try to extract the JSON array
-            match = re.search(r'(\[.*\])', result, re.DOTALL)
-            if match:
-                try:
-                    parsed = json.loads(match.group(1))
-                    return (
-                        json.dumps(parsed, ensure_ascii=False, indent=2),
-                        200,
-                        {'Content-Type': 'application/json'}
-                    )
-                except Exception as e2:
-                    print(f"Error parsing extracted JSON: {e2}")
-            # Fallback: return the raw result as a string
-            return (
-                json.dumps({'raw': result}, ensure_ascii=False, indent=2),
-                200,
-                {'Content-Type': 'application/json'}
-            )
+
+        result = fix_json_text(result, html)
+
+        with open(os.path.join(RUN_SAVE_DIR, f'result_suggested_inputs_{run_time_temp}.json'), 'w', encoding='utf-8') as f:
+            f.write(json.dumps(result, ensure_ascii=False, indent=2))
+        return (
+            json.dumps(result, ensure_ascii=False, indent=2),
+            200,
+            {'Content-Type': 'application/json'}
+        )
     except Exception as e:
         print(f"Error in suggest_inputs: {e}")
         return (
-            create_error_response('Error processing request'),
+            json.dumps({'error': 'Error processing request'}),
             500,
             {'Content-Type': 'application/json'}
         )
@@ -134,39 +186,44 @@ def suggest_inputs():
 
 @app.route('/update_input_suggestion', methods=['POST'])
 def update_input_suggestion():
+    print("Received update_input_suggestion request")
+    run_time_temp = int(time.time())
     data = request.get_json()
     field = data.get('field')
     range_ = data.get('range')
-    examples = data.get('examples')
     # Save or log the update for next steps (append to a file for now)
-    update_path = os.path.join(RUN_SAVE_DIR, 'input_suggestion_updates.json')
+    update_path = os.path.join(
+        RUN_SAVE_DIR, f'input_suggestion_updates_{run_time_temp}_{field}.json')
     try:
-        if os.path.exists(update_path):
-            with open(update_path, 'r', encoding='utf-8') as f:
-                updates = json.load(f)
-        else:
-            updates = []
-        updates.append({'field': field, 'range': range_, 'examples': examples})
-        with open(update_path, 'w', encoding='utf-8') as f:
-            json.dump(updates, f, ensure_ascii=False, indent=2)
         # After saving, if range is updated, ask LLM for new examples
         prompt = (
             f"تو یک تستر هوشمند هستی. برای یک فیلد در یک سایت با رینج زیر:\n"
             f"{range_}\n"
-            "لطفا ۵ مثال تستی مناسب برای این رینج تولید کن و فقط به صورت یک آرایه JSON خروجی بده:\n"
+            "لطفا 5 مثال تستی مناسب برای این رینج تولید کن و فقط به صورت یک آرایه JSON خروجی بده:\n"
             "[\"مثال۱\", \"مثال۲\", ...]"
         )
         try:
-            response = chat(model="llama3.1", messages=[
-                {"role": "user", "content": prompt}
-            ])
+            # response = chat(model="llama3.1", messages=[
+            #     {"role": "user", "content": prompt}
+            # ])
+            # raw = response['message']['content']
+
+            response = client.beta.chat.completions.parse(
+                model=model_name,
+                messages=[{"role": "user", "content": prompt}]
+            )
+            raw = response.choices[0].message.content
             match = re.search(
                 r'(\[.*\])',
-                response['message']['content'],
+                raw,
                 re.DOTALL
             )
             if match:
                 new_examples = json.loads(match.group(1))
+                updates = {'field': field, 'range': range_,
+                           'examples': new_examples}
+                with open(update_path, 'w', encoding='utf-8') as f:
+                    json.dump(updates, f, ensure_ascii=False, indent=2)
                 return (
                     json.dumps(
                         {'status': 'ok', 'new_examples': new_examples},
@@ -181,7 +238,7 @@ def update_input_suggestion():
             new_examples = []
         else:
             new_examples = []
-        return ( 
+        return (
             json.dumps(
                 {'status': 'ok'},
                 ensure_ascii=False, indent=2
@@ -197,9 +254,40 @@ def update_input_suggestion():
         )
 
 
-def create_error_response(message):
-    """Centralized error response function."""
-    return json.dumps({'error': message}, ensure_ascii=False, indent=2)
+def fix_json_text(text, html):
+    result = text['fields']
+    # Only keep fields that exist as <input> or <textarea> in the HTML
+    filtered = []
+    for field in result:
+        field['range'] = field.pop('limitations')
+        # Check if the field exists in HTML as input or textarea
+        field_id = field.get('id', '').replace('#', '')
+        name = field.get('name', '')
+        # Look for <input ... id="..."> or <textarea ... id="...">
+        input_pattern = (
+            rf'<input[^>]*((id=[\'"]{field_id}[\'"])|(name=[\'"]{re.escape(name)}[\'"]))'
+        )
+        textarea_pattern = (
+            rf'<textarea[^>]*((id=[\'"]{field_id}[\'"])|(name=[\'"]{re.escape(name)}[\'"]))'
+        )
+        valid_types = [
+            'text',
+            'password',
+            'email',
+            'number',
+            'date',
+            'textarea',
+            'select'
+        ]
+        exists = (
+            re.search(input_pattern, html)
+            or re.search(textarea_pattern, html)
+        )
+        if exists and field['type'] in valid_types:
+            # check not duplicate ID
+            if not any(f['id'] == field['id'] for f in filtered):
+                filtered.append(field)
+    return filtered
 
 
 if __name__ == '__main__':

@@ -1,0 +1,7 @@
+flask
+flask-cors
+pydantic
+bs4
+openai
+ollama
+together

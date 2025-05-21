@@ -28,6 +28,9 @@ This project provides a Flask-based backend server and a browser extension to:
 - Node.js (for browser extension development, optional)
 
 ### Installation
+You can use **either** of the following methods:
+
+#### 1. Clone and Run the Python Code
 1. **Clone the repository:**
    ```sh
    git clone https://github.com/yourusername/html_LLM_suggester.git
@@ -38,14 +41,16 @@ This project provides a Flask-based backend server and a browser extension to:
    pip install -r requirements.txt
    ```
    (You may need to manually install: `flask`, `flask-cors`, `pydantic`, `bs4`, `openai`, `ollama`)
-
 3. **(Optional) Set up Ollama or get an OpenRouter API key.**
+4. **Run the server:**
+   ```sh
+   python recorder_server.py
+   ```
+   You will be prompted to choose between local (Ollama) or API (OpenRouter).
 
-### Running the Server
-```sh
-python recorder_server.py
-```
-You will be prompted to choose between local (Ollama) or API (OpenRouter).
+#### 2. Use the Latest Release
+- Download the latest pre-built release from the [Releases page](https://github.com/ArNayyeri/html_LLM_suggester/releases) of this repository.
+- Extract and run the executable or provided files as described in the release notes.
 
 ### Using the Browser Extension
 - See the `my_recorder_extension/` folder for a Chrome extension to record page data.

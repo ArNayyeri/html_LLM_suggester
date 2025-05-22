@@ -279,16 +279,20 @@
     modal.style.padding = '16px';
     modal.style.zIndex = 99999;
     modal.style.boxShadow = '0 2px 12px #0003';
+    modal.style.width = '480px';
+    modal.style.maxWidth = '90vw';
+    modal.style.maxHeight = '90vh';
+    modal.style.overflowY = 'auto';
     modal.innerHTML = `
       <div style="font-weight:bold;margin-bottom:8px;">Edit Range & Examples</div>
       <div><b>Field:</b> ${item.name || item.id || ''}</div>
       <div style="margin:8px 0;">
         <label>Range:</label><br>
-        <input id="edit-range" type="text" value="${item.range || ''}" style="width:100%;margin-bottom:8px;" />
+        <textarea id="edit-range" style="width:100%;height:96px;margin-bottom:8px;resize:vertical;">${item.range || ''}</textarea>
       </div>
       <div style="margin:8px 0;">
         <label>Examples (one per line):</label><br>
-        <textarea id="edit-examples" style="width:100%;height:60px;">${(item.examples||[]).join('\n')}</textarea>
+        <textarea id="edit-examples" style="width:100%;height:96px;">${(item.examples||[]).join('\n')}</textarea>
       </div>
       <div style="text-align:right;">
         <button id="edit-cancel">Cancel</button>

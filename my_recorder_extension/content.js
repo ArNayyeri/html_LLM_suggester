@@ -288,13 +288,13 @@
       <div><b>Field:</b> ${item.name || item.id || ''}</div>
       <div style="margin:8px 0;">
         <label>Range:</label><br>
-        <textarea id="edit-range" style="width:100%;height:96px;margin-bottom:8px;resize:vertical;">${item.range || ''}</textarea>
+        <textarea id="edit-range" style="width:100%;height:96px;margin-bottom:8px;resize:vertical;direction:rtl;text-align:right;">${item.range || ''}</textarea>
       </div>
       <div style="margin:8px 0;">
         <label>Examples (one per line):</label><br>
         <textarea id="edit-examples" style="width:100%;height:96px;">${(item.examples||[]).join('\n')}</textarea>
       </div>
-      <div style="text-align:right;">
+      <div style="display:flex;justify-content:space-between;">
         <button id="edit-cancel">Cancel</button>
         <button id="edit-submit">Submit</button>
       </div>

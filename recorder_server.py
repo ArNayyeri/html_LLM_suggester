@@ -9,6 +9,14 @@ import uuid
 from pydantic import BaseModel, Field
 from bs4 import BeautifulSoup
 from openai import OpenAI
+import tiktoken
+
+# Use cl100k_base encoding (close approximation for Llama)
+encoding = tiktoken.get_encoding("cl100k_base")
+
+
+def count_tokens(text):
+    return len(encoding.encode(text))
 
 
 ollama_url = 'http://localhost:11434/v1'
@@ -92,6 +100,115 @@ def snapshot():
     return 'ok'
 
 
+def preserve_structure(soup, target_element):
+    """Preserve parent structure up to target element"""
+    parents = []
+    current = target_element.parent
+
+    while current and current.name:
+        parents.append(current)
+        current = current.parent
+
+    return list(reversed(parents))
+
+
+def truncate_with_context(soup, target_element, max_tokens=100000):
+    """Try to keep target element with as much context as possible"""
+    # Get parent structure
+    parents = preserve_structure(soup, target_element)
+
+    # Start with target element
+    essential_html = str(target_element)
+    token_count = count_tokens(essential_html)
+
+    if token_count >= max_tokens:
+        return None  # Target element itself is too large
+
+    # Add parent structure
+    for parent in parents:
+        # Create a copy of parent with minimal content
+        parent_copy = soup.new_tag(parent.name)
+        for attr_name, attr_value in parent.attrs.items():
+            parent_copy[attr_name] = attr_value
+
+        # Test if adding this parent keeps us under limit
+        temp_structure = str(parent_copy).replace(
+            '></', f'>{essential_html}</')
+        # Leave room for siblings
+        if count_tokens(temp_structure) < max_tokens * 0.8:
+            essential_html = temp_structure
+            token_count = count_tokens(essential_html)
+
+    # Try to add siblings and other content
+    remaining_tokens = max_tokens - token_count
+
+    # Add content before target
+    before_content = get_content_before(
+        soup, target_element, remaining_tokens // 2)
+
+    # Add content after target
+    after_content = get_content_after(
+        soup, target_element, remaining_tokens // 2)
+
+    # Combine everything
+    if before_content or after_content:
+        # Create new soup with combined content
+        new_soup = BeautifulSoup(
+            f"{before_content}{essential_html}{after_content}", 'html.parser')
+        return str(new_soup)
+
+    return essential_html
+
+
+def get_content_before(soup, target_element, max_tokens):
+    """Get content before target element within token limit"""
+    # Find all elements before target
+    all_elements = soup.find_all()
+    target_index = all_elements.index(target_element)
+
+    before_elements = all_elements[:target_index]
+    before_elements.reverse()  # Start from closest to target
+
+    collected_content = []
+    current_tokens = 0
+
+    for element in before_elements:
+        element_html = str(element)
+        element_tokens = count_tokens(element_html)
+
+        if current_tokens + element_tokens <= max_tokens:
+            collected_content.insert(0, element_html)  # Insert at beginning
+            current_tokens += element_tokens
+        else:
+            break
+
+    return ''.join(collected_content)
+
+
+def get_content_after(soup, target_element, max_tokens):
+    """Get content after target element within token limit"""
+    # Find all elements after target
+    all_elements = soup.find_all()
+    target_index = all_elements.index(target_element)
+
+    after_elements = all_elements[target_index + 1:]
+
+    collected_content = []
+    current_tokens = 0
+
+    for element in after_elements:
+        element_html = str(element)
+        element_tokens = count_tokens(element_html)
+
+        if current_tokens + element_tokens <= max_tokens:
+            collected_content.append(element_html)
+            current_tokens += element_tokens
+        else:
+            break
+
+    return ''.join(collected_content)
+
+
 def suggest_input_values(html):
     soup = BeautifulSoup(html, 'html.parser')
 
@@ -125,6 +242,12 @@ def suggest_input_values(html):
 
     extracted_data = []
     for target_id in ids:
+        # If the web is more than 128k tokens,
+        # it will be considered as an input within 100k tokens from where the desired input ID is.
+        if count_tokens(html) > 128 * 1024:
+            target_html = truncate_with_context(soup, soup.find(id=target_id))
+        else:
+            target_html = html
         # Build the prompt for structured extraction
 
         system_msg = {
@@ -135,7 +258,7 @@ def suggest_input_values(html):
                 "- name: مقدار attribute 'name'.\n"
                 "- id: مقدار attribute 'id'.\n"
                 "- type: نوع input (text، password و غیره) یا 'textarea'.\n"
-                "- limitations: قواعد اعتبارسنجی استخراج‌شده از attributes مانند minlength، maxlength، pattern یا placeholder. (مثلاً: 'حداقل دارای 8 حرف انگلیسی')\n"
+                "- limitations: قواعد اعتبارسنجی استخراج‌شده از ویژگی‌هایی مانند minlength، maxlength، pattern یا placeholder. این توضیح باید به زبان فارسی و در قالب چند جمله کامل نوشته شود. به‌جای استفاده از عبارت‌های کوتاه مثل 'حداقل دارای ۸ حرف انگلیسی'، باید توضیحی کامل داده شود. مثلاً:'رمز عبور باید حداقل ۸ کاراکتر طول داشته باشد. استفاده از حروف انگلیسی کوچک یا بزرگ مجاز است. همچنین می‌توان از اعداد و سایر کاراکترهای معمول برای افزایش امنیت استفاده کرد.'"
                 "- examples: 5 مقدار مثال که با این محدودیت‌ها مطابقت داشته باشند.\n"
                 "کلیدها را ثابت نگه دار ولی مقادیر محدودیت‌ها را به زبان فارسی بنویس.\n"
                 "خروجی را فقط به صورت یک شی JSON مطابق با schema پایدانتیک ارائه بده.\n"
@@ -157,7 +280,7 @@ def suggest_input_values(html):
                 "  \"id\": \"input-2\",\n"
                 "  \"type\": \"password\",\n"
                 "  \"examples\": [\"12345678\", \"password123\", \"adminadmin\", \"abcDEFghiJ\", \"userpass2024\"],\n"
-                "  \"limitations\": \"حداقل 8 حرف انگلیسی\"\n"
+                "  \"limitations\": \" رمز عبور باید حداقل ۸ کاراکتر طول داشته باشد. استفاده از حروف انگلیسی کوچک یا بزرگ مجاز است. همچنین می‌توان از اعداد و سایر کاراکترهای معمول برای افزایش امنیت استفاده کرد. \"\n"
                 "}]\n\n"
 
                 "مثال 2:\n"
@@ -174,7 +297,7 @@ def suggest_input_values(html):
                 "  \"id\": \"input-3\",\n"
                 "  \"type\": \"text\",\n"
                 "  \"examples\": [\"09123456789\", \"09351234567\", \"09221234567\", \"09901234567\", \"09111111111\"],\n"
-                "  \"limitations\": \"دقیقاً 11 رقم عددی\"\n"
+                "  \"limitations\": \" شماره تماس باید دقیقاً شامل ۱۱ رقم عددی باشد و هیچ فاصله، علامت یا حرفی در آن مجاز نیست. معمولاً با ۰۹ شروع می‌شود و فرمت آن مانند شماره‌های تلفن همراه در ایران است.\"\n"
                 "}]\n\n"
 
                 "مثال 3:\n"
@@ -191,7 +314,7 @@ def suggest_input_values(html):
                 "  \"id\": \"input-5\",\n"
                 "  \"type\": \"text\",\n"
                 "  \"examples\": [\"fa\", \"en\", \"de\", \"fr\", \"ar\"],\n"
-                "  \"limitations\": \"پیوند فارسی\"\n"
+                "  \"limitations\": \"این فیلد باید حاوی کد اختصاری یک زبان مانند 'fa' برای فارسی یا 'en' برای انگلیسی باشد. تنها استفاده از حروف کوچک انگلیسی مجاز است و معمولاً کد زبان در قالب دو حرف وارد می‌شود. \"\n"
                 "}]\n\n"
 
                 "مثال 4:\n"
@@ -214,7 +337,7 @@ def suggest_input_values(html):
                 "    \"پیام تست برای بررسی فرم.\",\n"
                 "    \"توضیح در مورد امکانات سایت.\"\n"
                 "  ],\n"
-                "  \"limitations\": \"حداقل 10 و حداکثر 100 کاراکتر\"\n"
+                "  \"limitations\": \"توضیح واردشده باید حداقل ۱۰ و حداکثر ۱۰۰ کاراکتر باشد. کاربر می‌تواند متن آزاد بنویسد، اما باید از نوشتن متن خیلی کوتاه یا خیلی بلند خودداری شود. متن باید معنی‌دار باشد و شامل حروف، کلمات و شاید علائم نگارشی باشد. \"\n"
                 "}]\n\n"
 
                 "مثال 5:\n"
@@ -231,12 +354,12 @@ def suggest_input_values(html):
                 "  \"id\": \"input-9\",\n"
                 "  \"type\": \"text\",\n"
                 "  \"examples\": [\"0012345678\", \"1234567890\", \"9876543210\", \"1122334455\", \"2233445566\"],\n"
-                "  \"limitations\": \"10 رقم عددی\"\n"
+                "  \"limitations\": \"کد ملی باید دقیقاً ۱۰ رقم عددی باشد. استفاده از حروف یا کاراکترهای غیرعددی مجاز نیست. این کد یک شناسه یکتای عددی است که به هر فرد اختصاص داده می‌شود و باید به‌درستی وارد شود.\"\n"
                 "}]\n"
             )
         }
 
-        user_msg = {"role": "user", "content": html}
+        user_msg = {"role": "user", "content": target_html}
 
         # Call the LLM with the JSON schema
         if is_local:
@@ -330,92 +453,116 @@ def update_input_suggestion():
     except Exception as e:
         print(f"Could not load previous update for field {field}: {e}")
 
-    # --- Build prompt with previous info if available ---
-    prompt = (
-        f"تو یک تستر هوشمند هستی. وظیفه تو تولید داده‌های تستی برای فیلدهای فرم در وب‌سایت‌ها است. "
-        f"در اینجا یک محدودیت (رینج) جدید برای یک فیلد به تو داده شده:\n"
-        f"{range_}\n"
-        "مثال‌ها باید شبیه مقادیری باشند که کاربران واقعی در فرم وارد می‌کنند، نه فقط داده‌های تصادفی یا ساختگی."
-    )
-    if examples_:
-        prompt += (
-            f"\nمثال‌هایی که کاربران واقعاً وارد کرده‌اند (به عنوان نمونه): {json.dumps(examples_, ensure_ascii=False)}\n"
-            "مثال‌های جدید باید از نظر سبک و واقع‌گرایی شبیه این مثال‌ها باشند."
+    # --- If range is empty but examples exist, generate range first ---
+    if not range_ and examples_:
+        try:
+            range_generation_prompt = (
+                "تو یک متخصص تحلیل داده هستی. بر اساس مثال‌های زیر، الگو و محدودیت‌های آنها را تشخیص بده "
+                "و یک توضیح دقیق و مختصر به زبان فارسی در مورد این محدودیت‌ها بنویس. "
+                "فقط یک عبارت کوتاه در حد یک جمله یا دو جمله بنویس، نه بیشتر. مثال: 'حداقل دارای 8 کاراکتر انگلیسی و حداقل یک عدد و حداقل یک حرف بزرگ' یا 'ایمیل معتبر' یا 'کد ملی 10 رقمی'"
+                f"\n\nمثال‌ها: {json.dumps(examples_, ensure_ascii=False)}"
+                "\n\nلطفاً فقط یک عبارت کوتاه به زبان فارسی بنویس که محدودیت‌های این داده‌ها را توضیح دهد، بدون هیچ توضیح اضافی."
+            )
+
+            range_response = client.chat.completions.create(
+                model=model_name,
+                messages=[{"role": "user", "content": range_generation_prompt}],
+                temperature=0.3,
+                max_tokens=100
+            )
+
+            range_ = range_response.choices[0].message.content.strip()
+            print(f"Generated range based on examples: {range_}")
+            new_examples = examples_
+        except Exception as e:
+            print(f"Error generating range from examples: {e}")
+            range_ = "محدودیت نامشخص"
+    else:
+        # --- Build prompt with previous info if available ---
+        prompt = (
+            f"تو یک تستر هوشمند هستی. وظیفه تو تولید داده‌های تستی برای فیلدهای فرم در وب‌سایت‌ها است. "
+            f"در اینجا یک محدودیت (رینج) جدید برای یک فیلد به تو داده شده:\n"
+            f"{range_}\n"
+            "مثال‌ها باید شبیه مقادیری باشند که کاربران واقعی در فرم وارد می‌کنند، نه فقط داده‌های تصادفی یا ساختگی."
         )
-    if previous_range and previous_examples:
-        prompt += (
-            "\nمحدودیت قبلی و مثال‌های قبلی را ببین و مثال‌های جدیدی تولید کن که با محدودیت جدید سازگار باشند و تکراری نباشند.\n"
-            f"محدودیت قبلی: {previous_range}\n"
-            f"مثال‌های قبلی: {json.dumps(previous_examples, ensure_ascii=False)}\n"
-        )
-    prompt += (
-        "لطفاً 5 مقدار ورودی مناسب و معتبر که با این محدودیت مطابقت داشته باشند تولید کن. "
-        "هر مقدار باید یک رشته واقع‌گرایانه و کاربردی باشد که بتوان در فرم واقعی استفاده کرد. "
-        "خروجی فقط باید به صورت یک آرایه JSON باشد:\n"
-        "[\"مثال۱\", \"مثال۲\", \"مثال۳\", \"مثال۴\", \"مثال۵\"]\n\n"
-        "مثال‌ها:\n\n"
-
-        "رینج: حداقل 8 حرف انگلیسی\n"
-        "خروجی:\n[\"password\", \"openai123\", \"machinelearning\", \"SecurePass1\", \"AIengineer\"]\n\n"
-
-        "رینج: دقیقاً 11 رقم عددی\n"
-        "خروجی:\n[\"09123456789\", \"09987654321\", \"09335557766\", \"09221234567\", \"09001112233\"]\n\n"
-
-        "رینج: بین 5 تا 15 کاراکتر\n"
-        "خروجی:\n[\"hello\", \"chatbot2024\", \"1234567890\", \"formTesting\", \"userinput\"]\n\n"
-
-        "رینج: کد ملی 10 رقمی\n"
-        "خروجی:\n[\"1234567890\", \"0011223344\", \"9876543210\", \"1122334455\", \"5566778899\"]\n\n"
-
-        "رینج: فقط حروف کوچک انگلیسی\n"
-        "خروجی:\n[\"hello\", \"username\", \"password\", \"openai\", \"testcase\"]"
-
-        ": فقط حروف فارسی با حداقل 3 کاراکتر\n"
-        "خروجی:\n[\"سلام\", \"کاربر\", \"تست\", \"برنامه\", \"مثال\"]\n\n"
-
-        "رینج: تاریخ با فرمت yyyy-mm-dd\n"
-        "خروجی:\n[\"2023-01-01\", \"2024-12-31\", \"1999-07-15\", \"2025-05-21\", \"2000-10-10\"]\n\n"
-
-        "رینج: ایمیل معتبر\n"
-        "خروجی:\n[\"test@example.com\", \"user123@gmail.com\", \"name.lastname@yahoo.com\", \"info@site.ir\", \"developer@domain.dev\"]\n\n"
-
-        "رینج: فقط اعداد بین 1 تا 100\n"
-        "خروجی:\n[\"5\", \"42\", \"100\", \"1\", \"73\"]\n\n"
-
-        "رینج: شماره پلاک خودرو (فرمت ایرانی)\n"
-        "خروجی:\n[\"12ب34567\", \"45د12345\", \"98س87654\", \"11الف22222\", \"21ج67890\"]"
-    )
-    try:
-        response = client.beta.chat.completions.parse(
-            model=model_name,
-            messages=[{"role": "user", "content": prompt}],
-            response_format=ExampleSchema,
-        )
-        raw = response.choices[0].message.content
-        data = json.loads(raw)
-        new_examples = data['examples']
         if examples_:
-            new_examples.extend(examples_)
-        # check for duplicates
-        new_examples = list(set(new_examples))
-        updates = {'field': field, 'range': range_,
-                   'examples': new_examples}
-        with open(update_path, 'w', encoding='utf-8') as f:
-            json.dump(updates, f, ensure_ascii=False, indent=2)
-        return (
-            json.dumps(
-                {'status': 'ok', 'new_examples': new_examples},
-                ensure_ascii=False, indent=2
-            ),
-            200,
-            {'Content-Type': 'application/json'}
+            prompt += (
+                f"\nمثال‌هایی که کاربران واقعاً وارد کرده‌اند (به عنوان نمونه): {json.dumps(examples_, ensure_ascii=False)}\n"
+                "مثال‌های جدید باید از نظر سبک و واقع‌گرایی شبیه این مثال‌ها باشند."
+            )
+        if previous_range and previous_examples:
+            prompt += (
+                "\nمحدودیت قبلی و مثال‌های قبلی را ببین و مثال‌های جدیدی تولید کن که با محدودیت جدید سازگار باشند و تکراری نباشند.\n"
+                f"محدودیت قبلی: {previous_range}\n"
+                f"مثال‌های قبلی: {json.dumps(previous_examples, ensure_ascii=False)}\n"
+            )
+        prompt += (
+            "لطفاً 5 مقدار ورودی مناسب و معتبر که با این محدودیت مطابقت داشته باشند تولید کن. "
+            "هر مقدار باید یک رشته واقع‌گرایانه و کاربردی باشد که بتوان در فرم واقعی استفاده کرد. "
+            "خروجی فقط باید به صورت یک آرایه JSON باشد:\n"
+            "[\"مثال۱\", \"مثال۲\", \"مثال۳\", \"مثال۴\", \"مثال۵\"]\n\n"
+            "مثال‌ها:\n\n"
+
+            "رینج: حداقل 8 حرف انگلیسی\n"
+            "خروجی:\n[\"password\", \"openai123\", \"machinelearning\", \"SecurePass1\", \"AIengineer\"]\n\n"
+
+            "رینج: دقیقاً 11 رقم عددی\n"
+            "خروجی:\n[\"09123456789\", \"09987654321\", \"09335557766\", \"09221234567\", \"09001112233\"]\n\n"
+
+            "رینج: بین 5 تا 15 کاراکتر\n"
+            "خروجی:\n[\"hello\", \"chatbot2024\", \"1234567890\", \"formTesting\", \"userinput\"]\n\n"
+
+            "رینج: کد ملی 10 رقمی\n"
+            "خروجی:\n[\"1234567890\", \"0011223344\", \"9876543210\", \"1122334455\", \"5566778899\"]\n\n"
+
+            "رینج: فقط حروف کوچک انگلیسی\n"
+            "خروجی:\n[\"hello\", \"username\", \"password\", \"openai\", \"testcase\"]"
+
+            ": فقط حروف فارسی با حداقل 3 کاراکتر\n"
+            "خروجی:\n[\"سلام\", \"کاربر\", \"تست\", \"برنامه\", \"مثال\"]\n\n"
+
+            "رینج: تاریخ با فرمت yyyy-mm-dd\n"
+            "خروجی:\n[\"2023-01-01\", \"2024-12-31\", \"1999-07-15\", \"2025-05-21\", \"2000-10-10\"]\n\n"
+
+            "رینج: ایمیل معتبر\n"
+            "خروجی:\n[\"test@example.com\", \"user123@gmail.com\", \"name.lastname@yahoo.com\", \"info@site.ir\", \"developer@domain.dev\"]\n\n"
+
+            "رینج: فقط اعداد بین 1 تا 100\n"
+            "خروجی:\n[\"5\", \"42\", \"100\", \"1\", \"73\"]\n\n"
+
+            "رینج: شماره پلاک خودرو (فرمت ایرانی)\n"
+            "خروجی:\n[\"12ب34567\", \"45د12345\", \"98س87654\", \"11الف22222\", \"21ج67890\"]"
         )
-    except Exception as e:
-        return (
-            json.dumps({'error': str(e)}),
-            500,
-            {'Content-Type': 'application/json'}
-        )
+        try:
+            response = client.beta.chat.completions.parse(
+                model=model_name,
+                messages=[{"role": "user", "content": prompt}],
+                response_format=ExampleSchema,
+            )
+            raw = response.choices[0].message.content
+            data = json.loads(raw)
+            new_examples = data['examples']
+            if examples_:
+                new_examples.extend(examples_)        # check for duplicates
+            new_examples = list(set(new_examples))
+        except Exception as e:
+            return (
+                json.dumps({'error': str(e)}),
+                500,
+                {'Content-Type': 'application/json'}
+            )
+    updates = {'field': field, 'range': range_,
+               'examples': new_examples}
+    with open(update_path, 'w', encoding='utf-8') as f:
+        json.dump(updates, f, ensure_ascii=False, indent=2)
+    return (
+        json.dumps(
+            {'status': 'ok', 'new_examples': new_examples, 'range': range_},
+            ensure_ascii=False, indent=2
+        ),
+        200,
+        {'Content-Type': 'application/json'}
+    )
 
 
 def fix_json_text(text, html):

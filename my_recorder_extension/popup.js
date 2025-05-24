@@ -53,40 +53,88 @@ document.getElementById('clear').onclick = function () {
   chrome.storage.local.set({ recordedEvents: [] }, updateCount);
 };
 
-// Patch the suggest-inputs button handler to inject suggestions into the page
+// Patch the suggest-inputs button handler to use background script
 const suggestBtn = document.getElementById('suggest-inputs');
 suggestBtn.onclick = function () {
-  // Get the active tab
-  chrome.tabs.query({ active: true, currentWindow: true }, function (tabs) {
-    if (!tabs[0]) return;
-    chrome.tabs.sendMessage(tabs[0].id, { type: 'getPageSnapshot' }, function (response) {
-      if (!response || !response.html) {
-        alert('Could not get page HTML.');
-        return;
-      }
-      fetch('http://localhost:5000/suggest_inputs', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ html: response.html })
-      })
-        .then(res => res.json())
-        .then(data => {
-          // Try to get the array from data
-          let arr = data;
-          if (data && data.raw) {
-            try { arr = JSON.parse(data.raw); } catch { arr = []; }
-          }
-          if (!Array.isArray(arr)) {
-            alert('No input suggestions found.');
-            return;
-          }
-          // Send suggestions to content script for DOM injection
-          chrome.tabs.sendMessage(tabs[0].id, { type: 'injectInputSuggestions', suggestions: arr });
-        })
-        .catch(err => {
-          alert('Error: ' + err);
-        });
+  // Record the start time for suggestion request
+  const suggestionStartTime = Date.now();
+  
+  // Record the suggestion request start event
+  chrome.storage.local.get({ recordedEvents: [] }, function (result) {
+    const events = result.recordedEvents;
+    events.push({
+      type: 'suggest_inputs_start',
+      time: suggestionStartTime,
+      url: window.location ? window.location.href : 'popup',
+      tag: 'BUTTON',
+      id: 'suggest-inputs',
+      class: 'extension-action',
+      value: null,
+      x: null,
+      y: null,
+      xpath: null
     });
+    chrome.storage.local.set({ recordedEvents: events });
+  });
+  
+  // Disable button during request
+  suggestBtn.disabled = true;
+  suggestBtn.textContent = 'Processing...';
+  
+  // Send message to background script
+  chrome.runtime.sendMessage({
+    type: 'requestSuggestions',
+    startTime: suggestionStartTime
+  }, function(response) {
+    const suggestionEndTime = Date.now();
+    const processingDuration = suggestionEndTime - suggestionStartTime;
+    
+    // Re-enable button
+    suggestBtn.disabled = false;
+    suggestBtn.textContent = 'Suggest Input Values';
+    
+    // Record the suggestion request completion event
+    chrome.storage.local.get({ recordedEvents: [] }, function (result) {
+      const events = result.recordedEvents;
+      events.push({
+        type: 'suggest_inputs_complete',
+        time: suggestionEndTime,
+        url: window.location ? window.location.href : 'popup',
+        tag: 'BUTTON',
+        id: 'suggest-inputs',
+        class: 'extension-action',
+        value: null,
+        x: null,
+        y: null,
+        xpath: null,
+        duration_ms: processingDuration,
+        success: response && response.success,
+        error: response && response.error ? response.error : null
+      });
+      chrome.storage.local.set({ recordedEvents: events });
+    });
+    
+    if (response && response.error) {
+      alert('Error: ' + response.error);
+    } else if (response && response.success) {
+      alert('Suggestions injected successfully! Look for ? buttons next to input fields.');
+    } else {
+      // Check if we can get the response from background (in case popup was closed)
+      chrome.tabs.query({ active: true, currentWindow: true }, function (tabs) {
+        if (tabs[0]) {
+          chrome.runtime.sendMessage({
+            type: 'getSuggestionResponse',
+            tabId: tabs[0].id
+          }, function(storedResponse) {
+            if (storedResponse) {
+              alert('Suggestions were processed while popup was closed. Check the page for ? buttons.');
+            } else {
+              alert('No suggestions found or request failed.');
+            }
+          });
+        }
+      });
+    }
   });
 };
 

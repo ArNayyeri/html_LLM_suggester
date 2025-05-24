@@ -235,7 +235,6 @@
     }
     return true;
   });
-
   function injectInputSuggestionButtons(suggestions) {
     // Remove old buttons if any
     document.querySelectorAll('.input-suggestion-btn').forEach(btn => btn.remove());
@@ -247,61 +246,263 @@
         el = document.querySelector(`[name="${item.name}"]`);
       }
       if (!el) return;
+
       const btn = document.createElement('button');
       btn.textContent = '?';
       btn.className = 'input-suggestion-btn';
-      btn.style.marginLeft = '4px';
-      btn.style.padding = '0 4px';
-      btn.style.fontSize = '10px';
-      btn.style.verticalAlign = 'middle';
+      btn.setAttribute('data-idx', idx);
+      
+      // Complete CSS isolation to prevent host page interference
+      btn.style.cssText = `
+        margin: 0 0 0 4px !important;
+        padding: 2px 6px !important;
+        font-size: 12px !important;
+        font-family: Arial, sans-serif !important;
+        font-weight: normal !important;
+        line-height: 1 !important;
+        vertical-align: middle !important;
+        border: 1px solid #ccc !important;
+        border-radius: 3px !important;
+        background-color: #f0f0f0 !important;
+        color: #333 !important;
+        cursor: pointer !important;
+        display: inline-block !important;
+        text-decoration: none !important;
+        text-align: center !important;
+        white-space: nowrap !important;
+        box-sizing: border-box !important;
+        min-width: 20px !important;
+        height: auto !important;
+        outline: none !important;
+        position: relative !important;
+        z-index: 9999 !important;
+        box-shadow: none !important;
+        text-shadow: none !important;
+        text-transform: none !important;
+        letter-spacing: normal !important;
+        word-spacing: normal !important;
+        float: none !important;
+        clear: none !important;
+        opacity: 1 !important;
+        visibility: visible !important;
+        overflow: visible !important;
+        transform: none !important;
+        transition: background-color 0.2s ease !important;
+      `;
+      
       btn.title = 'Show input info';
-      btn.onclick = (e) => {
+        // Add hover effects with event listeners to ensure they work
+      btn.addEventListener('mouseenter', function() {
+        // Only change color on hover if no state is set
+        if (!this.getAttribute('data-state')) {
+          this.style.setProperty('background-color', '#e0e0e0', 'important');
+        }
+      });
+      
+      btn.addEventListener('mouseleave', function() {
+        // Keep the current background color based on state
+        const state = this.getAttribute('data-state');
+        if (state === 'confirmed' || state === 'submitted') {
+          // Keep green
+          this.style.setProperty('background-color', '#44ff44', 'important');
+          this.style.setProperty('color', 'white', 'important');
+        } else if (state === 'cancelled' || state === 'failed') {
+          // Keep red
+          this.style.setProperty('background-color', '#ff4444', 'important');
+          this.style.setProperty('color', 'white', 'important');
+        } else {
+          // Return to default
+          this.style.setProperty('background-color', '#f0f0f0', 'important');
+          this.style.setProperty('color', '#333', 'important');
+        }
+      });
+        btn.onclick = (e) => {
         e.stopPropagation();
         e.preventDefault();
-        showEditModal(item, idx, suggestions);
+        
+        // Record question mark button click event
+        const questionMarkClickTime = Date.now();
+        record({
+          type: 'suggestion_question_mark_click',
+          time: questionMarkClickTime,
+          url: window.location.href,
+          tag: 'BUTTON',
+          id: `suggestion-btn-${idx}`,
+          class: 'input-suggestion-btn',
+          value: null,
+          x: e.clientX || null,
+          y: e.clientY || null,
+          xpath: null,
+          field_name: item.name || item.id || '',
+          field_type: item.type || '',
+          suggestion_index: idx
+        });
+        
+        showEditModal(item, idx, suggestions, questionMarkClickTime);
       };
+      
       el.parentNode.insertBefore(btn, el.nextSibling);
     });
-  }
-
-  function showEditModal(item, idx, suggestions) {
+  }  function showEditModal(item, idx, suggestions, questionMarkClickTime) {
     // Remove old modal if any
     const oldModal = document.getElementById('input-suggestion-modal');
     if (oldModal) oldModal.remove();
+    
+    // Record modal open event
+    const modalOpenTime = Date.now();
+    const modalOpenDuration = modalOpenTime - questionMarkClickTime;
+    
+    record({
+      type: 'suggestion_modal_open',
+      time: modalOpenTime,
+      url: window.location.href,
+      tag: 'DIV',
+      id: 'input-suggestion-modal',
+      class: 'extension-modal',
+      value: null,
+      x: null,
+      y: null,
+      xpath: null,
+      field_name: item.name || item.id || '',
+      field_type: item.type || '',
+      suggestion_index: idx,
+      open_delay_ms: modalOpenDuration
+    });
+    
     const modal = document.createElement('div');
     modal.id = 'input-suggestion-modal';
-    modal.style.position = 'fixed';
-    modal.style.top = '50%';
-    modal.style.left = '50%';
-    modal.style.transform = 'translate(-50%, -50%)';
-    modal.style.background = '#fff';
-    modal.style.border = '1px solid #888';
-    modal.style.padding = '16px';
-    modal.style.zIndex = 99999;
-    modal.style.boxShadow = '0 2px 12px #0003';
-    modal.style.width = '480px';
-    modal.style.maxWidth = '90vw';
-    modal.style.maxHeight = '90vh';
-    modal.style.overflowY = 'auto';
+    
+    // Complete CSS isolation for the modal
+    modal.style.cssText = `
+      position: fixed !important;
+      top: 50% !important;
+      left: 50% !important;
+      transform: translate(-50%, -50%) !important;
+      background: #fff !important;
+      border: 2px solid #888 !important;
+      padding: 20px !important;
+      z-index: 999999 !important;
+      box-shadow: 0 4px 20px rgba(0,0,0,0.3) !important;
+      width: 500px !important;
+      max-width: 90vw !important;
+      max-height: 90vh !important;
+      overflow-y: auto !important;
+      font-family: Arial, sans-serif !important;
+      font-size: 14px !important;
+      line-height: 1.4 !important;
+      color: #333 !important;
+      border-radius: 8px !important;
+      box-sizing: border-box !important;
+      margin: 0 !important;
+      text-align: left !important;
+      direction: ltr !important;
+    `;
+
     modal.innerHTML = `
-      <div style="font-weight:bold;margin-bottom:8px;">Edit Range & Examples</div>
-      <div><b>Field:</b> ${item.name || item.id || ''}</div>
-      <div style="margin:8px 0;">
-        <label>Range:</label><br>
-        <textarea id="edit-range" style="width:100%;height:96px;margin-bottom:8px;resize:vertical;direction:rtl;text-align:right;">${item.range || ''}</textarea>
+      <div style="font-weight:bold;margin-bottom:12px;font-size:16px;color:#333;">Edit Description & Examples</div>
+      <div style="margin-bottom:8px;"><b>Field:</b> ${item.name || item.id || ''}</div>
+      <div style="margin:12px 0;">
+        <label style="display:block;margin-bottom:4px;font-weight:bold;">Description:</label>
+        <textarea id="edit-range" style="width:100%;height:80px;margin-bottom:8px;resize:vertical;direction:rtl;text-align:right;padding:8px;border:1px solid #ccc;border-radius:4px;font-family:Arial,sans-serif;font-size:13px;box-sizing:border-box;">${item.range || ''}</textarea>
       </div>
-      <div style="margin:8px 0;">
-        <label>Examples (one per line):</label><br>
-        <textarea id="edit-examples" style="width:100%;height:96px;">${(item.examples||[]).join('\n')}</textarea>
+      <div style="margin:12px 0;">
+        <label style="display:block;margin-bottom:4px;font-weight:bold;">Examples (one per line):</label>
+        <textarea id="edit-examples" style="width:100%;height:80px;padding:8px;border:1px solid #ccc;border-radius:4px;font-family:Arial,sans-serif;font-size:13px;box-sizing:border-box;direction:ltr;text-align:left;">${(item.examples||[]).join('\n')}</textarea>
       </div>
-      <div style="display:flex;justify-content:space-between;">
-        <button id="edit-cancel">Cancel</button>
-        <button id="edit-submit">Submit</button>
+      <div style="display:flex;justify-content:space-between;gap:10px;margin-top:20px;">
+        <button id="edit-cancel" style="padding:8px 16px;border:1px solid #ddd;border-radius:4px;background:#f5f5f5;cursor:pointer;font-size:14px;min-width:80px;">Cancel</button>
+        <button id="edit-confirm" style="padding:8px 16px;border:1px solid #28a745;border-radius:4px;background:#28a745;color:white;cursor:pointer;font-size:14px;min-width:80px;">Confirm</button>
+        <button id="edit-submit" style="padding:8px 16px;border:1px solid #007bff;border-radius:4px;background:#007bff;color:white;cursor:pointer;font-size:14px;min-width:80px;">Submit</button>
       </div>
     `;
+
     document.body.appendChild(modal);
-    document.getElementById('edit-cancel').onclick = () => modal.remove();
-    document.getElementById('edit-submit').onclick = () => {
+    
+    // Get the button element to change its color
+    const buttonElement = document.querySelector(`.input-suggestion-btn[data-idx="${idx}"]`);    document.getElementById('edit-cancel').onclick = () => {
+      const cancelTime = Date.now();
+      const modalDuration = cancelTime - modalOpenTime;
+      
+      // Record cancel event
+      record({
+        type: 'suggestion_modal_cancel',
+        time: cancelTime,
+        url: window.location.href,
+        tag: 'BUTTON',
+        id: 'edit-cancel',
+        class: 'modal-button',
+        value: null,
+        x: null,
+        y: null,
+        xpath: null,
+        field_name: item.name || item.id || '',
+        field_type: item.type || '',
+        suggestion_index: idx,
+        modal_duration_ms: modalDuration
+      });
+      
+      modal.remove();
+      // Change button color to red when cancelled
+      if (buttonElement) {
+        buttonElement.style.setProperty('background-color', '#ff4444', 'important');
+        buttonElement.style.setProperty('color', 'white', 'important');
+        // Store state for hover effect
+        buttonElement.setAttribute('data-state', 'cancelled');
+      }
+    };
+    
+    document.getElementById('edit-confirm').onclick = () => {
+      const confirmTime = Date.now();
+      const modalDuration = confirmTime - modalOpenTime;
+      
+      // Record confirm event
+      record({
+        type: 'suggestion_modal_confirm',
+        time: confirmTime,
+        url: window.location.href,
+        tag: 'BUTTON',
+        id: 'edit-confirm',
+        class: 'modal-button',
+        value: null,
+        x: null,
+        y: null,
+        xpath: null,
+        field_name: item.name || item.id || '',
+        field_type: item.type || '',
+        suggestion_index: idx,
+        modal_duration_ms: modalDuration
+      });
+      
+      modal.remove();
+      // Change button color to green when confirmed
+      if (buttonElement) {
+        buttonElement.style.setProperty('background-color', '#44ff44', 'important');
+        buttonElement.style.setProperty('color', 'white', 'important');
+        // Store state for hover effect
+        buttonElement.setAttribute('data-state', 'confirmed');
+      }
+    };    document.getElementById('edit-submit').onclick = () => {
+      const submitStartTime = Date.now();
+      const modalDuration = submitStartTime - modalOpenTime;
+      
+      // Record submit start event
+      record({
+        type: 'suggestion_modal_submit_start',
+        time: submitStartTime,
+        url: window.location.href,
+        tag: 'BUTTON',
+        id: 'edit-submit',
+        class: 'modal-button',
+        value: null,
+        x: null,
+        y: null,
+        xpath: null,
+        field_name: item.name || item.id || '',
+        field_type: item.type || '',
+        suggestion_index: idx,
+        modal_duration_ms: modalDuration
+      });
+      
       const newRange = document.getElementById('edit-range').value;
       const newExamples = document.getElementById('edit-examples').value.split('\n').map(s=>s.trim()).filter(Boolean);
       // Update the suggestion in memory
@@ -318,22 +519,95 @@
         })
       }).then(res => res.json())
       .then(data => {
+        const submitEndTime = Date.now();
+        const submitDuration = submitEndTime - submitStartTime;
+        const totalModalDuration = submitEndTime - modalOpenTime;
+        
+        // Record submit success event
+        record({
+          type: 'suggestion_modal_submit_success',
+          time: submitEndTime,
+          url: window.location.href,
+          tag: 'BUTTON',
+          id: 'edit-submit',
+          class: 'modal-button',
+          value: null,
+          x: null,
+          y: null,
+          xpath: null,
+          field_name: item.name || item.id || '',
+          field_type: item.type || '',
+          suggestion_index: idx,
+          submit_duration_ms: submitDuration,
+          total_modal_duration_ms: totalModalDuration,
+          server_response: data
+        });
+        
         modal.remove();
+        // Change button color to green when submitted successfully
+        if (buttonElement) {
+          buttonElement.style.setProperty('background-color', '#44ff44', 'important');
+          buttonElement.style.setProperty('color', 'white', 'important');
+          // Store state for hover effect
+          buttonElement.setAttribute('data-state', 'submitted');
+        }
+        
         if (data && Array.isArray(data.new_examples) && data.new_examples.length > 0) {
           // Update the examples in the modal and in the HTML
           suggestions[idx].examples = data.new_examples;
+          
+          // Update the range if the server generated one
+          if (data.range) {
+            suggestions[idx].range = data.range;
+          }
+          
           // Optionally, update the field's placeholder or title with new examples
           if (item.id && document.getElementById(item.id)) {
             document.getElementById(item.id).setAttribute('title', 'Examples: ' + data.new_examples.join(', '));
           } else if (item.name && document.querySelector(`[name="${item.name}"]`)) {
             document.querySelector(`[name="${item.name}"]`).setAttribute('title', 'Examples: ' + data.new_examples.join(', '));
           }
-          alert('Updated! New examples:\n' + data.new_examples.join('\n'));
-        } else {
+          
+          // Show both the new range and examples in the alert
+          const alertMessage = data.range ? 
+            `Updated!\nDescription: ${data.range}\nNew examples:\n${data.new_examples.join('\n')}` :
+            `Updated!\nNew examples:\n${data.new_examples.join('\n')}`;
+          
+          alert(alertMessage);        } else {
           alert('Updated and sent to backend!');
         }
       }).catch(() => {
+        const submitFailTime = Date.now();
+        const submitDuration = submitFailTime - submitStartTime;
+        const totalModalDuration = submitFailTime - modalOpenTime;
+        
+        // Record submit failure event
+        record({
+          type: 'suggestion_modal_submit_failure',
+          time: submitFailTime,
+          url: window.location.href,
+          tag: 'BUTTON',
+          id: 'edit-submit',
+          class: 'modal-button',
+          value: null,
+          x: null,
+          y: null,
+          xpath: null,
+          field_name: item.name || item.id || '',
+          field_type: item.type || '',
+          suggestion_index: idx,
+          submit_duration_ms: submitDuration,
+          total_modal_duration_ms: totalModalDuration
+        });
+        
         modal.remove();
+        // Change button color to red when submission fails
+        if (buttonElement) {
+          buttonElement.style.setProperty('background-color', '#ff4444', 'important');
+          buttonElement.style.setProperty('color', 'white', 'important');
+          // Store state for hover effect
+          buttonElement.setAttribute('data-state', 'failed');
+        }
         alert('Failed to send to backend.');
       });
     };

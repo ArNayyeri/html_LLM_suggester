@@ -10,6 +10,11 @@ from pydantic import BaseModel, Field
 from bs4 import BeautifulSoup
 from openai import OpenAI
 import tiktoken
+from deep_translator import GoogleTranslator
+import tkinter as tk
+from tkinter import ttk, scrolledtext, messagebox
+import threading
+import webbrowser
 
 # Use cl100k_base encoding (close approximation for Llama)
 encoding = tiktoken.get_encoding("cl100k_base")
@@ -65,7 +70,7 @@ class FormField(BaseModel):
     type: str = Field(...,
                       description="Input type (text, password, etc.) or 'textarea'")
     limitations: str = Field(
-        ..., description="Validation rules inferred from attributes like minlength, maxlength, pattern, placeholder")
+        ..., description="Validation rules inferred from attributes like minlength, maxlength, pattern, placeholder in English")
     examples: list[str] = Field(...,
                                 description="Five example values that satisfy the limitations")
 
@@ -73,6 +78,26 @@ class FormField(BaseModel):
 class ExampleSchema(BaseModel):
     examples: list[str] = Field(...,
                                 description="Five example values that satisfy the range")
+
+
+def translate_to_persian(english_text):
+    """Translate English limitations to Persian using deep_translator"""
+    try:
+        translator = GoogleTranslator(source='en', target='fa')
+        return translator.translate(english_text)
+    except Exception as e:
+        print(f"Translation error: {e}")
+        return english_text  # Return original if translation fails
+
+
+def translate_to_english(persian_text):
+    """Translate Persian text to English using deep_translator"""
+    try:
+        translator = GoogleTranslator(source='fa', target='en')
+        return translator.translate(persian_text)
+    except Exception as e:
+        print(f"Translation error: {e}")
+        return persian_text  # Return original if translation fails
 
 
 @app.route('/snapshot', methods=['POST'])
@@ -253,109 +278,110 @@ def suggest_input_values(html):
         system_msg = {
             "role": "system",
             "content": (
-                "شما یک پارسر HTML هستید. HTML زیر را دریافت می‌کنید و فقط عنصری که id آن برابر با مقدار مشخص‌شده است را پردازش می‌کنید. "
-                "برای آن عنصر، یک شی JSON با کلیدهای name، id، type، limitations و examples بسازید. "
-                "- name: مقدار attribute 'name'.\n"
-                "- id: مقدار attribute 'id'.\n"
-                "- type: نوع input (text، password و غیره) یا 'textarea'.\n"
-                "- limitations: قواعد اعتبارسنجی استخراج‌شده از ویژگی‌هایی مانند minlength، maxlength، pattern یا placeholder. این توضیح باید به زبان فارسی و در قالب چند جمله کامل نوشته شود. به‌جای استفاده از عبارت‌های کوتاه مثل 'حداقل دارای ۸ حرف انگلیسی'، باید توضیحی کامل داده شود. مثلاً:'رمز عبور باید حداقل ۸ کاراکتر طول داشته باشد. استفاده از حروف انگلیسی کوچک یا بزرگ مجاز است. همچنین می‌توان از اعداد و سایر کاراکترهای معمول برای افزایش امنیت استفاده کرد.'"
-                "- examples: 5 مقدار مثال که با این محدودیت‌ها مطابقت داشته باشند.\n"
-                "کلیدها را ثابت نگه دار ولی مقادیر محدودیت‌ها را به زبان فارسی بنویس.\n"
-                "خروجی را فقط به صورت یک شی JSON مطابق با schema پایدانتیک ارائه بده.\n"
-                f"فقط و فقط عنصری با id برابر با '{target_id}' را پردازش کن. هیچ عنصر دیگری را در خروجی قرار نده.\n"
-                "در ادامه 5 مثال کامل برای فهم این مورد به تو پیشنهاد شده است\n\n"
-                "مثال 1:\n"
-                "ورودی:\n"
+                "You are an HTML parser. You receive HTML below and process only the element whose id equals the specified value. "
+                "For that element, create a JSON object with keys: name, id, type, limitations, and examples. "
+                "- name: The value of the 'name' attribute.\n"
+                "- id: The value of the 'id' attribute.\n"
+                "- type: Input type (text, password, etc.) or 'textarea'.\n"
+                "- limitations: Validation rules extracted from attributes like minlength, maxlength, pattern, or placeholder. This description should be written in English as complete sentences. Instead of using short phrases like 'minimum 8 English characters', provide a complete explanation. For example: 'The password must be at least 8 characters long. English lowercase or uppercase letters are allowed. Numbers and other common characters can also be used to increase security.'\n"
+                "- examples: 5 example values that match these limitations. Examples should be appropriate for the field context (English or Persian based on the field purpose).\n"
+                "Keep the keys constant but write limitation values in English.\n"
+                "Provide output only as a JSON object matching the Pydantic schema.\n"
+                f"Process only and exclusively the element with id equal to '{target_id}'. Do not include any other element in the output.\n"
+                "Here are 5 complete examples for understanding:\n\n"
+
+                "Example 1:\n"
+                "Input:\n"
                 "<form>\n"
-                "  <label for=\"input-0\">نام کاربری:</label>\n"
-                "  <input id=\"input-0\" name=\"نام کاربری\" type=\"text\" placeholder=\"مثلاً ali123\" />\n"
-                "  <label for=\"input-1\">ایمیل:</label>\n"
-                "  <input id=\"input-1\" name=\"ایمیل\" type=\"email\" />\n"
-                "  <label for=\"input-2\">رمز عبور:</label>\n"
-                "  <input id=\"input-2\" name=\"رمز عبور\" type=\"password\" minlength=\"8\" />\n"
+                "  <label for=\"input-0\">Username:</label>\n"
+                "  <input id=\"input-0\" name=\"username\" type=\"text\" placeholder=\"e.g. ali123\" />\n"
+                "  <label for=\"input-1\">Email:</label>\n"
+                "  <input id=\"input-1\" name=\"email\" type=\"email\" />\n"
+                "  <label for=\"input-2\">Password:</label>\n"
+                "  <input id=\"input-2\" name=\"password\" type=\"password\" minlength=\"8\" />\n"
                 "</form>\n"
-                "خروجی (برای input-2):\n"
-                "[{\n"
-                "  \"name\": \"رمز عبور\",\n"
+                "Output (for input-2):\n"
+                "{\n"
+                "  \"name\": \"password\",\n"
                 "  \"id\": \"input-2\",\n"
                 "  \"type\": \"password\",\n"
                 "  \"examples\": [\"12345678\", \"password123\", \"adminadmin\", \"abcDEFghiJ\", \"userpass2024\"],\n"
-                "  \"limitations\": \" رمز عبور باید حداقل ۸ کاراکتر طول داشته باشد. استفاده از حروف انگلیسی کوچک یا بزرگ مجاز است. همچنین می‌توان از اعداد و سایر کاراکترهای معمول برای افزایش امنیت استفاده کرد. \"\n"
-                "}]\n\n"
+                "  \"limitations\": \"The password must be at least 8 characters long. English lowercase or uppercase letters are allowed. Numbers and other common characters can also be used to increase security.\"\n"
+                "}\n\n"
 
-                "مثال 2:\n"
-                "ورودی:\n"
+                "Example 2:\n"
+                "Input:\n"
                 "<form>\n"
-                "  <label for=\"input-3\">شماره تماس:</label>\n"
-                "  <input id=\"input-3\" name=\"شماره تماس\" type=\"text\" pattern=\"\\d{11}\" />\n"
-                "  <label for=\"input-4\">کد امنیتی:</label>\n"
-                "  <input id=\"input-4\" name=\"کد امنیتی\" type=\"text\" maxlength=\"6\" />\n"
+                "  <label for=\"input-3\">Phone Number:</label>\n"
+                "  <input id=\"input-3\" name=\"phone\" type=\"text\" pattern=\"\\d{11}\" />\n"
+                "  <label for=\"input-4\">Security Code:</label>\n"
+                "  <input id=\"input-4\" name=\"security_code\" type=\"text\" maxlength=\"6\" />\n"
                 "</form>\n"
-                "خروجی (برای input-3):\n"
-                "[{\n"
-                "  \"name\": \"شماره تماس\",\n"
+                "Output (for input-3):\n"
+                "{\n"
+                "  \"name\": \"phone\",\n"
                 "  \"id\": \"input-3\",\n"
                 "  \"type\": \"text\",\n"
                 "  \"examples\": [\"09123456789\", \"09351234567\", \"09221234567\", \"09901234567\", \"09111111111\"],\n"
-                "  \"limitations\": \" شماره تماس باید دقیقاً شامل ۱۱ رقم عددی باشد و هیچ فاصله، علامت یا حرفی در آن مجاز نیست. معمولاً با ۰۹ شروع می‌شود و فرمت آن مانند شماره‌های تلفن همراه در ایران است.\"\n"
-                "}]\n\n"
+                "  \"limitations\": \"The phone number must contain exactly 11 numeric digits with no spaces, symbols, or letters allowed. It typically starts with 09 and follows the format of Iranian mobile phone numbers.\"\n"
+                "}\n\n"
 
-                "مثال 3:\n"
-                "ورودی:\n"
+                "Example 3:\n"
+                "Input:\n"
                 "<form>\n"
-                "  <label for=\"input-5\">زبان ترجیحی:</label>\n"
-                "  <input id=\"input-5\" name=\"زبان\" type=\"text\" placeholder=\"fa\" />\n"
-                "  <label for=\"input-6\">نام خانوادگی:</label>\n"
-                "  <input id=\"input-6\" name=\"نام خانوادگی\" type=\"text\" />\n"
+                "  <label for=\"input-5\">Preferred Language:</label>\n"
+                "  <input id=\"input-5\" name=\"language\" type=\"text\" placeholder=\"fa\" />\n"
+                "  <label for=\"input-6\">Last Name:</label>\n"
+                "  <input id=\"input-6\" name=\"lastname\" type=\"text\" />\n"
                 "</form>\n"
-                "خروجی (برای input-5):\n"
-                "[{\n"
-                "  \"name\": \"زبان\",\n"
+                "Output (for input-5):\n"
+                "{\n"
+                "  \"name\": \"language\",\n"
                 "  \"id\": \"input-5\",\n"
                 "  \"type\": \"text\",\n"
                 "  \"examples\": [\"fa\", \"en\", \"de\", \"fr\", \"ar\"],\n"
-                "  \"limitations\": \"این فیلد باید حاوی کد اختصاری یک زبان مانند 'fa' برای فارسی یا 'en' برای انگلیسی باشد. تنها استفاده از حروف کوچک انگلیسی مجاز است و معمولاً کد زبان در قالب دو حرف وارد می‌شود. \"\n"
-                "}]\n\n"
+                "  \"limitations\": \"This field should contain the abbreviation code of a language such as 'fa' for Persian or 'en' for English. Only lowercase English letters are allowed and the language code is typically entered in two-letter format.\"\n"
+                "}\n\n"
 
-                "مثال 4:\n"
-                "ورودی:\n"
+                "Example 4:\n"
+                "Input:\n"
                 "<form>\n"
-                "  <label for=\"input-7\">توضیحات:</label>\n"
-                "  <textarea id=\"input-7\" name=\"توضیحات\" minlength=\"10\" maxlength=\"100\"></textarea>\n"
-                "  <label for=\"input-8\">موقعیت جغرافیایی:</label>\n"
-                "  <input id=\"input-8\" name=\"موقعیت\" type=\"text\" />\n"
+                "  <label for=\"input-7\">Description:</label>\n"
+                "  <textarea id=\"input-7\" name=\"description\" minlength=\"10\" maxlength=\"100\"></textarea>\n"
+                "  <label for=\"input-8\">Location:</label>\n"
+                "  <input id=\"input-8\" name=\"location\" type=\"text\" />\n"
                 "</form>\n"
-                "خروجی (برای input-7):\n"
-                "[{\n"
-                "  \"name\": \"توضیحات\",\n"
+                "Output (for input-7):\n"
+                "{\n"
+                "  \"name\": \"description\",\n"
                 "  \"id\": \"input-7\",\n"
                 "  \"type\": \"textarea\",\n"
                 "  \"examples\": [\n"
-                "    \"این یک متن آزمایشی است.\",\n"
-                "    \"کاربر درباره تجربه کاربری توضیح می‌دهد.\",\n"
-                "    \"لطفاً اطلاعات بیشتری وارد نمایید.\",\n"
-                "    \"پیام تست برای بررسی فرم.\",\n"
-                "    \"توضیح در مورد امکانات سایت.\"\n"
+                "    \"This is a test text.\",\n"
+                "    \"User describes their experience.\",\n"
+                "    \"Please enter more information.\",\n"
+                "    \"Test message for form validation.\",\n"
+                "    \"Description about website features.\"\n"
                 "  ],\n"
-                "  \"limitations\": \"توضیح واردشده باید حداقل ۱۰ و حداکثر ۱۰۰ کاراکتر باشد. کاربر می‌تواند متن آزاد بنویسد، اما باید از نوشتن متن خیلی کوتاه یا خیلی بلند خودداری شود. متن باید معنی‌دار باشد و شامل حروف، کلمات و شاید علائم نگارشی باشد. \"\n"
-                "}]\n\n"
+                "  \"limitations\": \"The entered description must be at least 10 and at most 100 characters long. Users can write free text, but should avoid writing very short or very long text. The text should be meaningful and contain letters, words, and possibly punctuation marks.\"\n"
+                "}\n\n"
 
-                "مثال 5:\n"
-                "ورودی:\n"
+                "Example 5:\n"
+                "Input:\n"
                 "<form>\n"
-                "  <label for=\"input-9\">کد ملی:</label>\n"
-                "  <input id=\"input-9\" name=\"کد ملی\" type=\"text\" pattern=\"\\d{10}\" />\n"
-                "  <label for=\"input-10\">آدرس:</label>\n"
-                "  <input id=\"input-10\" name=\"آدرس\" type=\"text\" />\n"
+                "  <label for=\"input-9\">National ID:</label>\n"
+                "  <input id=\"input-9\" name=\"national_id\" type=\"text\" pattern=\"\\d{10}\" />\n"
+                "  <label for=\"input-10\">Address:</label>\n"
+                "  <input id=\"input-10\" name=\"address\" type=\"text\" />\n"
                 "</form>\n"
-                "خروجی (برای input-9):\n"
-                "[{\n"
-                "  \"name\": \"کد ملی\",\n"
+                "Output (for input-9):\n"
+                "{\n"
+                "  \"name\": \"national_id\",\n"
                 "  \"id\": \"input-9\",\n"
                 "  \"type\": \"text\",\n"
                 "  \"examples\": [\"0012345678\", \"1234567890\", \"9876543210\", \"1122334455\", \"2233445566\"],\n"
-                "  \"limitations\": \"کد ملی باید دقیقاً ۱۰ رقم عددی باشد. استفاده از حروف یا کاراکترهای غیرعددی مجاز نیست. این کد یک شناسه یکتای عددی است که به هر فرد اختصاص داده می‌شود و باید به‌درستی وارد شود.\"\n"
-                "}]\n"
+                "  \"limitations\": \"The national ID must be exactly 10 numeric digits. Letters or non-numeric characters are not allowed. This is a unique numeric identifier assigned to each person and must be entered correctly.\"\n"
+                "}\n"
             )
         }
 
@@ -379,8 +405,471 @@ def suggest_input_values(html):
 
             # Parse the structured JSON content
         data = json.loads(raw)
+
+        # Translate limitations to Persian
+        data['limitations'] = translate_to_persian(data['limitations'])
+
         extracted_data.append(data)
     return {'fields': extracted_data}
+
+
+class KatalonTestImprover:
+    def __init__(self, katalon_html, katalon_path, events_data):
+        self.katalon_html = katalon_html
+        self.katalon_path = katalon_path
+        self.events_data = events_data
+        self.current_katalon = katalon_html
+
+        # Add chat history to maintain context
+        self.chat_history = []
+
+        # Create the main window
+        self.root = tk.Tk()
+        self.root.title("Katalon Test Improver")
+        self.root.geometry("1200x800")
+
+        self.setup_ui()
+        self.get_initial_suggestions()
+
+    def add_to_chat_history(self, role, content):
+        """Add message to chat history for context"""
+        self.chat_history.append({"role": role, "content": content})
+        # Keep only last 20 messages to avoid token limit issues
+        if len(self.chat_history) > 20:
+            self.chat_history = self.chat_history[-20:]
+
+    def setup_ui(self):
+        # Create main frame
+        main_frame = ttk.Frame(self.root)
+        main_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+
+        # Title
+        title_label = ttk.Label(main_frame, text="Katalon Test Improvement Assistant",
+                                font=('Arial', 16, 'bold'))
+        title_label.pack(pady=(0, 10))
+
+        # Create notebook for tabs
+        notebook = ttk.Notebook(main_frame)
+        notebook.pack(fill=tk.BOTH, expand=True)
+
+        # Tab 1: Current Test
+        test_frame = ttk.Frame(notebook)
+        notebook.add(test_frame, text="Current Test")
+
+        # Current test display
+        ttk.Label(test_frame, text="Current Katalon Test:", font=(
+            'Arial', 12, 'bold')).pack(anchor=tk.W, pady=(0, 5))
+
+        self.test_display = scrolledtext.ScrolledText(
+            test_frame, height=15, wrap=tk.WORD)
+        self.test_display.pack(fill=tk.BOTH, expand=True, pady=(0, 10))
+        self.test_display.insert(
+            tk.END, self.extract_table_content(self.katalon_html))
+
+        # Buttons frame for test tab
+        test_buttons_frame = ttk.Frame(test_frame)
+        test_buttons_frame.pack(fill=tk.X, pady=5)
+
+        ttk.Button(test_buttons_frame, text="Open in Browser",
+                   command=self.open_in_browser).pack(side=tk.LEFT, padx=(0, 5))
+        ttk.Button(test_buttons_frame, text="Save Current Test",
+                   command=self.save_current_test).pack(side=tk.LEFT, padx=5)
+        ttk.Button(test_buttons_frame, text="Regenerate Test",
+                   command=self.regenerate_test).pack(side=tk.LEFT, padx=5)
+
+        # Tab 2: Chat with AI
+        chat_frame = ttk.Frame(notebook)
+        notebook.add(chat_frame, text="AI Assistant")
+
+        # AI suggestions display
+        ttk.Label(chat_frame, text="AI Suggestions & Chat:", font=(
+            'Arial', 12, 'bold')).pack(anchor=tk.W, pady=(0, 5))
+
+        self.chat_display = scrolledtext.ScrolledText(
+            chat_frame, height=20, wrap=tk.WORD, state=tk.DISABLED)
+        self.chat_display.pack(fill=tk.BOTH, expand=True, pady=(0, 10))
+
+        # User input frame
+        input_frame = ttk.Frame(chat_frame)
+        input_frame.pack(fill=tk.X, pady=5)
+
+        ttk.Label(input_frame, text="Your message:").pack(anchor=tk.W)
+
+        self.user_input = tk.Text(input_frame, height=3, wrap=tk.WORD)
+        self.user_input.pack(fill=tk.X, pady=(5, 5))
+
+        # Buttons frame for chat
+        chat_buttons_frame = ttk.Frame(input_frame)
+        chat_buttons_frame.pack(fill=tk.X, pady=5)
+
+        ttk.Button(chat_buttons_frame, text="Send Message",
+                   command=self.send_message).pack(side=tk.LEFT, padx=(0, 5))
+        ttk.Button(chat_buttons_frame, text="Apply AI Suggestions",
+                   command=self.apply_suggestions).pack(side=tk.LEFT, padx=5)
+        ttk.Button(chat_buttons_frame, text="Get New Suggestions",
+                   command=self.get_new_suggestions).pack(side=tk.LEFT, padx=5)
+        ttk.Button(chat_buttons_frame, text="Clear History",
+                   command=self.clear_chat_history).pack(side=tk.LEFT, padx=5)
+
+        # Status bar
+        self.status_var = tk.StringVar(value="Ready")
+        status_bar = ttk.Label(
+            main_frame, textvariable=self.status_var, relief=tk.SUNKEN)
+        status_bar.pack(fill=tk.X, pady=(10, 0))
+
+        # Bind Enter key to send message
+        self.user_input.bind('<Control-Return>', lambda e: self.send_message())
+
+    def extract_table_content(self, html):
+        """Extract just the table content for display"""
+        soup = BeautifulSoup(html, 'html.parser')
+        table = soup.find('table')
+        if table:
+            rows = table.find_all('tr')
+            content = []
+            for row in rows[1:]:  # Skip header row
+                cells = row.find_all('td')
+                if len(cells) >= 3:
+                    command = cells[0].get_text().strip()
+                    target = cells[1].get_text().strip()
+                    value = cells[2].get_text().strip()
+                    content.append(f"{command:<15} | {target:<30} | {value}")
+            return '\n'.join(content)
+        return "No table found"
+
+    def add_chat_message(self, sender, message, color="black"):
+        """Add a message to the chat display"""
+        self.chat_display.config(state=tk.NORMAL)
+        self.chat_display.insert(tk.END, f"\n{sender}: ", f"{sender.lower()}")
+        self.chat_display.insert(tk.END, f"{message}\n")
+
+        # Configure tags for different senders
+        self.chat_display.tag_configure(
+            "ai", foreground="blue", font=('Arial', 10, 'bold'))
+        self.chat_display.tag_configure(
+            "user", foreground="green", font=('Arial', 10, 'bold'))
+        self.chat_display.tag_configure(
+            "system", foreground="red", font=('Arial', 10, 'bold'))
+
+        self.chat_display.config(state=tk.DISABLED)
+        self.chat_display.see(tk.END)
+
+    def get_initial_suggestions(self):
+        """Get initial AI suggestions for the test"""
+        self.status_var.set("Getting AI suggestions...")
+        self.add_chat_message(
+            "System", "Analyzing your Katalon test and generating suggestions...")
+
+        def get_suggestions():
+            try:
+                current_test = self.extract_table_content(self.current_katalon)
+
+                prompt = f"""You are a test automation expert. Analyze this Katalon Recorder test and provide specific suggestions for improvement:
+
+Current Test:
+{current_test}
+
+Please analyze and suggest improvements in these areas:
+1. **Wait Times**: Are the pause commands appropriate? Too long or too short?
+2. **Element Locators**: Are xpath selectors reliable? Should we use id or css selectors instead?
+3. **Test Structure**: Is the test flow logical and maintainable?
+4. **Missing Steps**: Are there any verification steps or assertions missing?
+5. **Optimization**: Can any steps be combined or simplified?
+
+Provide specific, actionable suggestions in Katalon command format only. Do not provide explanations or code - just suggest commands in this format:
+command | target | value
+
+Example suggestions:
+- assertTitle | Google | 
+- verifyElementPresent | id=search-button |
+- pause | 2000 | Wait 2s
+- type | id=username | testuser
+- click | css=.submit-btn |"""
+
+                # Add system context to chat history
+                system_context = f"I am analyzing a Katalon test with the following structure:\n{current_test}"
+                self.add_to_chat_history("system", system_context)
+                self.add_to_chat_history("user", prompt)
+
+                if is_local:
+                    response = chat(model="llama3.1",
+                                    messages=self.chat_history)
+                    suggestions = response['message']['content']
+                else:
+                    response = client.chat.completions.create(
+                        model=model_name,
+                        messages=self.chat_history,
+                        temperature=0.7,
+                        max_tokens=1000
+                    )
+                    suggestions = response.choices[0].message.content
+
+                # Add AI response to history
+                self.add_to_chat_history("assistant", suggestions)
+
+                self.root.after(
+                    0, lambda: self.add_chat_message("AI", suggestions))
+                self.root.after(0, lambda: self.status_var.set("Ready"))
+
+            except Exception as e:
+                self.root.after(0, lambda: self.add_chat_message(
+                    "System", f"Error getting suggestions: {str(e)}"))
+                self.root.after(0, lambda: self.status_var.set("Error"))
+
+        threading.Thread(target=get_suggestions, daemon=True).start()
+
+    def send_message(self):
+        """Send user message to AI"""
+        message = self.user_input.get(1.0, tk.END).strip()
+        if not message:
+            return
+
+        self.add_chat_message("User", message)
+        self.user_input.delete(1.0, tk.END)
+        self.status_var.set("AI is thinking...")
+
+        def get_response():
+            try:
+                current_test = self.extract_table_content(self.current_katalon)
+
+                # Create context-aware prompt that includes current test state
+                contextual_prompt = f"""{message}"""
+
+                # Add user message to history
+                self.add_to_chat_history("user", contextual_prompt)
+
+                if is_local:
+                    response = chat(model="llama3.1",
+                                    messages=self.chat_history)
+                    ai_response = response['message']['content']
+                else:
+                    response = client.chat.completions.create(
+                        model=model_name,
+                        messages=self.chat_history,
+                        temperature=0.7,
+                        max_tokens=1000
+                    )
+                    ai_response = response.choices[0].message.content
+
+                # Add AI response to history
+                self.add_to_chat_history("assistant", ai_response)
+
+                self.root.after(
+                    0, lambda: self.add_chat_message("AI", ai_response))
+                self.root.after(0, lambda: self.status_var.set("Ready"))
+
+            except Exception as e:
+                self.root.after(0, lambda: self.add_chat_message(
+                    "System", f"Error: {str(e)}"))
+                self.root.after(0, lambda: self.status_var.set("Error"))
+
+        threading.Thread(target=get_response, daemon=True).start()
+
+    def apply_suggestions(self):
+        """Let AI apply its suggestions to improve the test"""
+        self.status_var.set("Applying AI suggestions...")
+
+        def apply_improvements():
+            try:
+                current_test = self.extract_table_content(self.current_katalon)
+
+                prompt = f"""Based on our previous conversation and suggestions, please improve this Katalon test by applying the best practices we discussed:
+
+Current Test:
+{current_test}
+
+Please generate an improved version of this test considering:
+1. Our previous suggestions and discussion
+2. Better element locators (prefer id > css > xpath)
+3. Appropriate wait times (not too long, not too short)
+4. Added verification steps where appropriate
+5. Better test structure
+
+Return the improved test in the same format as the input, with each line containing:
+command | target | value
+
+Only return the improved test commands, nothing else."""
+
+                # Add to chat history
+                self.add_to_chat_history("user", prompt)
+
+                if is_local:
+                    response = chat(model="llama3.1",
+                                    messages=self.chat_history)
+                    improved_test = response['message']['content']
+                else:
+                    response = client.chat.completions.create(
+                        model=model_name,
+                        messages=self.chat_history,
+                        temperature=0.3,
+                        max_tokens=2000
+                    )
+                    improved_test = response.choices[0].message.content
+
+                # Add AI response to history
+                self.add_to_chat_history("assistant", improved_test)
+
+                # Convert improved test back to HTML format
+                new_html = self.convert_text_to_katalon_html(improved_test)
+                self.current_katalon = new_html
+
+                self.root.after(0, lambda: self.update_test_display())
+                self.root.after(0, lambda: self.add_chat_message(
+                    "AI", "Test has been improved based on our previous discussion! Check the 'Current Test' tab to see the changes."))
+                self.root.after(
+                    0, lambda: self.status_var.set("Test improved"))
+
+            except Exception as e:
+                self.root.after(0, lambda: self.add_chat_message(
+                    "System", f"Error applying suggestions: {str(e)}"))
+                self.root.after(0, lambda: self.status_var.set("Error"))
+
+        threading.Thread(target=apply_improvements, daemon=True).start()
+
+    def get_new_suggestions(self):
+        """Get fresh AI suggestions while maintaining context"""
+        self.status_var.set("Getting new suggestions...")
+
+        def get_fresh_suggestions():
+            try:
+                current_test = self.extract_table_content(self.current_katalon)
+
+                prompt = f"""Based on our previous conversation, please analyze the current state of this Katalon test and provide new suggestions:
+
+Current Test:
+{current_test}
+
+Considering our previous discussion and any changes made, please provide fresh suggestions for further improvements. Focus on areas we haven't addressed yet or new issues you notice.
+
+Provide specific, actionable suggestions in Katalon command format:
+command | target | value"""
+
+                # Add to chat history
+                self.add_to_chat_history("user", prompt)
+
+                if is_local:
+                    response = chat(model="llama3.1",
+                                    messages=self.chat_history)
+                    suggestions = response['message']['content']
+                else:
+                    response = client.chat.completions.create(
+                        model=model_name,
+                        messages=self.chat_history,
+                        temperature=0.7,
+                        max_tokens=1000
+                    )
+                    suggestions = response.choices[0].message.content
+
+                # Add AI response to history
+                self.add_to_chat_history("assistant", suggestions)
+
+                self.root.after(
+                    0, lambda: self.add_chat_message("AI", f"Fresh suggestions based on our conversation:\n{suggestions}"))
+                self.root.after(0, lambda: self.status_var.set("Ready"))
+
+            except Exception as e:
+                self.root.after(0, lambda: self.add_chat_message(
+                    "System", f"Error getting new suggestions: {str(e)}"))
+                self.root.after(0, lambda: self.status_var.set("Error"))
+
+        threading.Thread(target=get_fresh_suggestions, daemon=True).start()
+
+    def convert_text_to_katalon_html(self, text_commands):
+        """Convert text commands back to Katalon HTML format"""
+        lines = text_commands.strip().split('\n')
+        rows = []
+
+        for line in lines:
+            line = line.strip()
+            if '|' in line:
+                parts = [part.strip() for part in line.split('|')]
+                if len(parts) >= 3:
+                    command, target, value = parts[0], parts[1], parts[2]
+                    rows.append(f'''<tr>
+    <td>{command}</td>
+    <td>{target}</td>
+    <td>{value}</td>
+</tr>''')
+
+        # Get base URL from original HTML
+        soup = BeautifulSoup(self.katalon_html, 'html.parser')
+        base_link = soup.find('link', rel='selenium.base')
+        base_url = base_link['href'] if base_link else "http://localhost:3000"
+
+        html_template = '''<!DOCTYPE html>
+<html>
+<head>
+    <meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+    <link rel="selenium.base" href="{base_url}">
+    <title>Improved Katalon Test</title>
+</head>
+<body>
+<table cellpadding="1" cellspacing="1" border="1">
+<thead>
+<tr><td rowspan="1" colspan="3">Improved Katalon Test</td></tr>
+</thead>
+<tbody>
+{rows}
+</tbody>
+</table>
+</body>
+</html>'''
+
+        return html_template.format(base_url=base_url, rows='\n'.join(rows))
+
+    def update_test_display(self):
+        """Update the test display with current HTML"""
+        self.test_display.delete(1.0, tk.END)
+        self.test_display.insert(
+            tk.END, self.extract_table_content(self.current_katalon))
+
+    def open_in_browser(self):
+        """Open the current test in browser"""
+        temp_path = os.path.join(RUN_SAVE_DIR, 'temp_katalon_test.html')
+        with open(temp_path, 'w', encoding='utf-8') as f:
+            f.write(self.current_katalon)
+        webbrowser.open(f'file://{os.path.abspath(temp_path)}')
+
+    def save_current_test(self):
+        """Save the current improved test"""
+        with open(self.katalon_path, 'w', encoding='utf-8') as f:
+            f.write(self.current_katalon)
+        self.add_chat_message("System", "Test saved successfully!")
+        self.status_var.set("Test saved")
+
+    def regenerate_test(self):
+        """Regenerate the test from original events"""
+        try:
+            new_katalon = convert_to_katalon_format(self.events_data)
+            self.current_katalon = new_katalon
+            self.update_test_display()
+            self.add_chat_message(
+                "System", "Test regenerated from original events.")
+            self.status_var.set("Test regenerated")
+        except Exception as e:
+            self.add_chat_message(
+                "System", f"Error regenerating test: {str(e)}")
+
+    def clear_chat_history(self):
+        """Clear chat history and start fresh"""
+        self.chat_history = []
+        self.add_chat_message(
+            "System", "Chat history cleared. Starting fresh conversation.")
+        self.status_var.set("History cleared")
+
+    def show(self):
+        """Show the window"""
+        self.root.mainloop()
+
+
+def show_katalon_improver(katalon_html, katalon_path, events_data):
+    """Show the Katalon test improver window"""
+    def run_improver():
+        improver = KatalonTestImprover(katalon_html, katalon_path, events_data)
+        improver.show()
+
+    # Run in a separate thread to not block the Flask server
+    threading.Thread(target=run_improver, daemon=True).start()
 
 
 @app.route('/events', methods=['POST'])
@@ -389,10 +878,211 @@ def events():
     events_path = os.path.join(RUN_SAVE_DIR, 'recorded_events.json')
     with open(events_path, 'w', encoding='utf-8') as f:
         json.dump(data['events'], f, ensure_ascii=False, indent=2)
-    print(
-        f"Saved {len(data['events'])} events to recorded_events.json"
-    )
+
+    # Create Katalon Recorder table
+    katalon_table = convert_to_katalon_format(data['events'])
+    katalon_path = os.path.join(RUN_SAVE_DIR, 'katalon_test.html')
+    with open(katalon_path, 'w', encoding='utf-8') as f:
+        f.write(katalon_table)
+
+    print(f"Saved {len(data['events'])} events to recorded_events.json")
+    print(f"Saved Katalon Recorder table to katalon_test.html")
+
+    # Show the Katalon test improver window
+    show_katalon_improver(katalon_table, katalon_path, data['events'])
+
     return 'ok'
+
+
+def convert_to_katalon_format(events):
+    """Convert recorded events to Katalon Recorder HTML table format"""
+
+    # Filter out extension-specific events
+    extension_events = [
+        'suggest_inputs_start',
+        'suggest_inputs_complete',
+        'suggestion_question_mark_click',
+        'suggestion_modal_open',
+        'suggestion_modal_cancel',
+        'suggestion_modal_confirm',
+        'suggestion_modal_submit_start',
+        'suggestion_modal_submit_success',
+        'suggestion_modal_submit_failure'
+    ]
+
+    # Extension-specific element IDs or prefixes
+    extension_element_ids = [
+        'edit-range',
+        'edit-examples',
+        'edit-cancel',
+        'edit-confirm',
+        'edit-submit',
+        'input-suggestion-modal',
+        'suggest-inputs'
+    ]
+
+    # Filter valid events and calculate extension durations
+    valid_events = []
+    extension_durations = {}  # Track extension processing times between events
+
+    for i, event in enumerate(events):
+        event_type = event.get('type', '')
+        element_id = event.get('id', '')
+
+        # Skip extension-specific event types
+        if event_type in extension_events:
+            continue
+
+        # Skip clicks on extension-specific elements
+        if event_type == 'click' and any(element_id.startswith(prefix) for prefix in extension_element_ids):
+            continue
+
+        # Skip typing in extension-specific elements
+        if event_type == 'change' and any(element_id.startswith(prefix) for prefix in extension_element_ids):
+            continue
+
+        # Skip events from the extension's popup
+        if event.get('url', '').startswith('chrome-extension://'):
+            continue
+
+        # Calculate extension duration since last valid event
+        extension_duration = 0
+        if len(valid_events) > 0:
+            last_valid_time = valid_events[-1]['time']
+            current_time = event.get('time')
+
+            # Find extension events between last valid event and current event
+            for check_event in events:
+                check_time = check_event.get('time', 0)
+                check_type = check_event.get('type', '')
+
+                if last_valid_time < check_time < current_time and check_type in extension_events:
+                    if 'duration_ms' in check_event:
+                        extension_duration += check_event['duration_ms']
+
+        # Store the extension duration for this event
+        extension_durations[len(valid_events)] = extension_duration
+        valid_events.append(event)
+
+    # Generate Katalon commands with proper timing
+    katalon_commands = []
+    previous_time = None
+
+    for i, event in enumerate(valid_events):
+        event_type = event.get('type', '')
+        tag = event.get('tag', '').lower()
+        element_id = event.get('id', '')
+        xpath = event.get('xpath', '')
+        value = event.get('value', '')
+        url = event.get('url', '')
+        current_time = event.get('time')
+
+        # Add wait command if there's a significant time gap between actions
+        if previous_time and current_time and len(katalon_commands) > 0:
+            raw_time_diff = current_time - previous_time
+            extension_duration = extension_durations.get(i, 0)
+            actual_time_diff = raw_time_diff - extension_duration
+
+            # Only add wait if actual time difference is more than 1 second
+            if actual_time_diff > 1000:
+                wait_seconds = round(actual_time_diff / 1000, 1)
+                katalon_commands.append({
+                    'command': 'pause',
+                    'target': str(int(actual_time_diff)),
+                    'value': f'Wait {wait_seconds}s'
+                })
+
+        # Determine target locator
+        target = ""
+        if element_id:
+            target = f"id={element_id}"
+        elif xpath:
+            target = f"xpath={xpath}"
+        else:
+            target = f"css={tag}"
+
+        # Convert event types to Katalon commands
+        command_added = False
+        if event_type == 'click':
+            katalon_commands.append({
+                'command': 'click',
+                'target': target,
+                'value': ''
+            })
+            command_added = True
+
+        elif event_type == 'change':
+            if tag == 'input' or tag == 'textarea':
+                katalon_commands.append({
+                    'command': 'type',
+                    'target': target,
+                    'value': value or ''
+                })
+                command_added = True
+
+        elif event_type == 'submit':
+            katalon_commands.append({
+                'command': 'submit',
+                'target': target,
+                'value': ''
+            })
+            command_added = True
+
+        elif event_type in ['pageload', 'popstate', 'hashchange']:
+            if url:
+                katalon_commands.append({
+                    'command': 'open',
+                    'target': url,
+                    'value': ''
+                })
+                command_added = True
+
+        # Update previous_time only if we added a command
+        if command_added:
+            previous_time = current_time
+
+    # Generate HTML table
+    html_template = '''<!DOCTYPE html>
+<html>
+<head>
+    <meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+    <link rel="selenium.base" href="{base_url}">
+    <title>Recorded Test</title>
+</head>
+<body>
+<table cellpadding="1" cellspacing="1" border="1">
+<thead>
+<tr><td rowspan="1" colspan="3">Recorded Test</td></tr>
+</thead>
+<tbody>
+{rows}
+</tbody>
+</table>
+</body>
+</html>'''
+
+    # Get base URL from first event
+    base_url = "http://localhost:3000"
+    if valid_events:
+        first_url = valid_events[0].get('url', '')
+        if first_url:
+            from urllib.parse import urlparse
+            parsed = urlparse(first_url)
+            base_url = f"{parsed.scheme}://{parsed.netloc}"
+
+    # Generate table rows
+    rows = []
+    for cmd in katalon_commands:
+        rows.append(f'''<tr>
+    <td>{cmd['command']}</td>
+    <td>{cmd['target']}</td>
+    <td>{cmd['value']}</td>
+</tr>''')
+
+    return html_template.format(
+        base_url=base_url,
+        rows='\n'.join(rows)
+    )
 
 
 @app.route('/suggest_inputs', methods=['POST'])
@@ -457,81 +1147,92 @@ def update_input_suggestion():
     if not range_ and examples_:
         try:
             range_generation_prompt = (
-                "تو یک متخصص تحلیل داده هستی. بر اساس مثال‌های زیر، الگو و محدودیت‌های آنها را تشخیص بده "
-                "و یک توضیح دقیق و مختصر به زبان فارسی در مورد این محدودیت‌ها بنویس. "
-                "فقط یک عبارت کوتاه در حد یک جمله یا دو جمله بنویس، نه بیشتر. مثال: 'حداقل دارای 8 کاراکتر انگلیسی و حداقل یک عدد و حداقل یک حرف بزرگ' یا 'ایمیل معتبر' یا 'کد ملی 10 رقمی'"
-                f"\n\nمثال‌ها: {json.dumps(examples_, ensure_ascii=False)}"
-                "\n\nلطفاً فقط یک عبارت کوتاه به زبان فارسی بنویس که محدودیت‌های این داده‌ها را توضیح دهد، بدون هیچ توضیح اضافی."
+                "You are a data analysis expert. Based on the examples below, identify their patterns and limitations "
+                "and write a precise and concise description in English about these limitations. "
+                "Write only a short phrase in one or two sentences, no more. Example: 'minimum 8 English characters with at least one number and one uppercase letter' or 'valid email' or '10-digit national ID'"
+                f"\n\nExamples: {json.dumps(examples_, ensure_ascii=False)}"
+                "\n\nPlease write only a short phrase in English that explains the limitations of this data, without any additional explanation."
             )
 
-            range_response = client.chat.completions.create(
+            response = client.chat.completions.create(
                 model=model_name,
                 messages=[{"role": "user", "content": range_generation_prompt}],
                 temperature=0.3,
                 max_tokens=100
             )
 
-            range_ = range_response.choices[0].message.content.strip()
+            english_range = response.choices[0].message.content.strip()
+            range_ = translate_to_persian(english_range)
             print(f"Generated range based on examples: {range_}")
             new_examples = examples_
         except Exception as e:
             print(f"Error generating range from examples: {e}")
             range_ = "محدودیت نامشخص"
     else:
+        # First translate Persian range to English for processing
+        english_range = range_
+        if any('\u0600' <= c <= '\u06FF' for c in range_):  # Check if contains Persian characters
+            english_range = translate_to_english(range_)
+
         # --- Build prompt with previous info if available ---
         prompt = (
-            f"تو یک تستر هوشمند هستی. وظیفه تو تولید داده‌های تستی برای فیلدهای فرم در وب‌سایت‌ها است. "
-            f"در اینجا یک محدودیت (رینج) جدید برای یک فیلد به تو داده شده:\n"
-            f"{range_}\n"
-            "مثال‌ها باید شبیه مقادیری باشند که کاربران واقعی در فرم وارد می‌کنند، نه فقط داده‌های تصادفی یا ساختگی."
+            f"You are an intelligent tester. Your job is to generate test data for form fields on websites. "
+            f"Here you are given a new limitation (range) for a field:\n"
+            f"{english_range}\n"
+            "Examples should be similar to values that real users would enter in the form, not just random or artificial data."
         )
         if examples_:
             prompt += (
-                f"\nمثال‌هایی که کاربران واقعاً وارد کرده‌اند (به عنوان نمونه): {json.dumps(examples_, ensure_ascii=False)}\n"
-                "مثال‌های جدید باید از نظر سبک و واقع‌گرایی شبیه این مثال‌ها باشند."
+                f"\nExamples that users have actually entered (as samples): {json.dumps(examples_, ensure_ascii=False)}\n"
+                "New examples should be similar in style and realism to these examples."
             )
         if previous_range and previous_examples:
+            # Translate previous range to English if needed
+            prev_english_range = previous_range
+            if any('\u0600' <= c <= '\u06FF' for c in previous_range):
+                prev_english_range = translate_to_english(previous_range)
+
             prompt += (
-                "\nمحدودیت قبلی و مثال‌های قبلی را ببین و مثال‌های جدیدی تولید کن که با محدودیت جدید سازگار باشند و تکراری نباشند.\n"
-                f"محدودیت قبلی: {previous_range}\n"
-                f"مثال‌های قبلی: {json.dumps(previous_examples, ensure_ascii=False)}\n"
+                "\nSee the previous limitation and examples and generate new examples that are compatible with the new limitation and are not repetitive.\n"
+                f"Previous limitation: {prev_english_range}\n"
+                f"Previous examples: {json.dumps(previous_examples, ensure_ascii=False)}\n"
             )
         prompt += (
-            "لطفاً 5 مقدار ورودی مناسب و معتبر که با این محدودیت مطابقت داشته باشند تولید کن. "
-            "هر مقدار باید یک رشته واقع‌گرایانه و کاربردی باشد که بتوان در فرم واقعی استفاده کرد. "
-            "خروجی فقط باید به صورت یک آرایه JSON باشد:\n"
-            "[\"مثال۱\", \"مثال۲\", \"مثال۳\", \"مثال۴\", \"مثال۵\"]\n\n"
-            "مثال‌ها:\n\n"
+            "Please generate 5 appropriate and valid input values that match this limitation. "
+            "Each value should be a realistic and practical string that can be used in a real form. "
+            "Output should only be in the form of a JSON array:\n"
+            "[\"example1\", \"example2\", \"example3\", \"example4\", \"example5\"]\n\n"
+            "Examples:\n\n"
 
-            "رینج: حداقل 8 حرف انگلیسی\n"
-            "خروجی:\n[\"password\", \"openai123\", \"machinelearning\", \"SecurePass1\", \"AIengineer\"]\n\n"
+            "Range: minimum 8 English characters\n"
+            "Output:\n[\"password\", \"openai123\", \"machinelearning\", \"SecurePass1\", \"AIengineer\"]\n\n"
 
-            "رینج: دقیقاً 11 رقم عددی\n"
-            "خروجی:\n[\"09123456789\", \"09987654321\", \"09335557766\", \"09221234567\", \"09001112233\"]\n\n"
+            "Range: exactly 11 numeric digits\n"
+            "Output:\n[\"09123456789\", \"09987654321\", \"09335557766\", \"09221234567\", \"09001112233\"]\n\n"
 
-            "رینج: بین 5 تا 15 کاراکتر\n"
-            "خروجی:\n[\"hello\", \"chatbot2024\", \"1234567890\", \"formTesting\", \"userinput\"]\n\n"
+            "Range: between 5 to 15 characters\n"
+            "Output:\n[\"hello\", \"chatbot2024\", \"1234567890\", \"formTesting\", \"userinput\"]\n\n"
 
-            "رینج: کد ملی 10 رقمی\n"
-            "خروجی:\n[\"1234567890\", \"0011223344\", \"9876543210\", \"1122334455\", \"5566778899\"]\n\n"
+            "Range: 10-digit national ID\n"
+            "Output:\n[\"1234567890\", \"0011223344\", \"9876543210\", \"1122334455\", \"5566778899\"]\n\n"
 
-            "رینج: فقط حروف کوچک انگلیسی\n"
-            "خروجی:\n[\"hello\", \"username\", \"password\", \"openai\", \"testcase\"]"
+            "Range: only lowercase English letters\n"
+            "Output:\n[\"hello\", \"username\", \"password\", \"openai\", \"testcase\"]\n\n"
 
-            ": فقط حروف فارسی با حداقل 3 کاراکتر\n"
-            "خروجی:\n[\"سلام\", \"کاربر\", \"تست\", \"برنامه\", \"مثال\"]\n\n"
+            "Range: only Persian letters with minimum 3 characters\n"
+            "Output:\n[\"سلام\", \"کاربر\", \"تست\", \"برنامه\", \"مثال\"]\n\n"
 
-            "رینج: تاریخ با فرمت yyyy-mm-dd\n"
-            "خروجی:\n[\"2023-01-01\", \"2024-12-31\", \"1999-07-15\", \"2025-05-21\", \"2000-10-10\"]\n\n"
+            "Range: date with yyyy-mm-dd format\n"
+            "Output:\n[\"2023-01-01\", \"2024-12-31\", \"1999-07-15\", \"2025-05-21\", \"2000-10-10\"]\n\n"
 
-            "رینج: ایمیل معتبر\n"
-            "خروجی:\n[\"test@example.com\", \"user123@gmail.com\", \"name.lastname@yahoo.com\", \"info@site.ir\", \"developer@domain.dev\"]\n\n"
+            "Range: valid email\n"
+            "Output:\n[\"test@example.com\", \"user123@gmail.com\", \"name.lastname@yahoo.com\", \"info@site.ir\", \"developer@domain.dev\"]\n\n"
 
-            "رینج: فقط اعداد بین 1 تا 100\n"
-            "خروجی:\n[\"5\", \"42\", \"100\", \"1\", \"73\"]\n\n"
+            "Range: numbers only between 1 to 100\n"
+            "Output:\n[\"5\", \"42\", \"100\", \"1\", \"73\"]\n\n"
 
-            "رینج: شماره پلاک خودرو (فرمت ایرانی)\n"
-            "خروجی:\n[\"12ب34567\", \"45د12345\", \"98س87654\", \"11الف22222\", \"21ج67890\"]"
+            "Range: Iranian car license plate format\n"
+            "Output:\n[\"12ب34567\", \"45د12345\", \"98س87654\", \"11الف22222\", \"21ج67890\"]"
         )
         try:
             response = client.beta.chat.completions.parse(

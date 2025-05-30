@@ -26,5 +26,14 @@
       ],
       "run_at": "document_start"
     }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "suggestion_popup.html",
+        "suggestion_popup.js"
+      ],
+      "matches": ["<all_urls>"]
+    }
   ]
 }

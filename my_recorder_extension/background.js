@@ -5,6 +5,30 @@ let suggestionResponses = new Map();
 
 // Handle messages from popup and content scripts
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+  if (request.type === 'getSuggestion') {
+    // Get the latest suggestion data from storage for a specific index
+    chrome.storage.local.get({ currentSuggestions: [] }, function(result) {
+      const currentSuggestions = result.currentSuggestions || [];
+      const idx = request.idx;
+      
+      if (idx >= 0 && idx < currentSuggestions.length) {
+        const suggestion = currentSuggestions[idx];
+        
+        // Verify this is the same field (prevent confusion if the indexes change)
+        if ((request.id && suggestion.id === request.id) ||
+            (request.name && suggestion.name === request.name) ||
+            (!request.id && !request.name)) { // Fallback if no identifiers
+          sendResponse({ suggestion: suggestion });
+        } else {
+          sendResponse({ error: 'Field mismatch' });
+        }
+      } else {
+        sendResponse({ error: 'Invalid suggestion index' });
+      }
+    });
+    return true; // Keep the message channel open for the async response
+  }
+  
   if (request.type === 'getSuggestionResponse') {
     const response = suggestionResponses.get(request.tabId);
     if (response) {
@@ -109,3 +133,73 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 chrome.tabs.onRemoved.addListener((tabId) => {
   suggestionResponses.delete(tabId);
 });
+
+// Set up periodic sync for any failed confirmations
+function setupPeriodicSync() {
+  // Try to sync failed confirmations every 5 minutes
+  setInterval(syncPendingConfirmations, 5 * 60 * 1000);
+  
+  // Also sync on extension startup
+  syncPendingConfirmations();
+}
+
+// Function to sync any pending confirmations
+function syncPendingConfirmations() {
+  console.log("Checking for pending confirmations to sync...");
+  
+  chrome.storage.local.get({ failedConfirmations: [] }, function(result) {
+    const failedConfirmations = result.failedConfirmations || [];
+    
+    if (failedConfirmations.length === 0) {
+      console.log("No pending confirmations to sync");
+      return;
+    }
+    
+    console.log(`Found ${failedConfirmations.length} pending confirmations to sync`);
+    
+    // Process each confirmation sequentially to avoid overwhelming the server
+    syncNextConfirmation(failedConfirmations, 0, []);
+  });
+}
+
+// Process confirmations one by one
+function syncNextConfirmation(confirmations, index, results) {
+  if (index >= confirmations.length) {
+    // All done, update storage with remaining failed ones
+    const stillFailed = confirmations.filter((_, i) => results[i] === false);
+    chrome.storage.local.set({ failedConfirmations: stillFailed });
+    
+    const successCount = results.filter(r => r === true).length;
+    console.log(`Successfully synced ${successCount} of ${confirmations.length} confirmations`);
+    return;
+  }
+  
+  const item = confirmations[index];
+  
+  fetch('http://localhost:5000/confirm_suggestion', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(item)
+  })
+  .then(response => {
+    if (!response.ok) {
+      throw new Error(`HTTP error! Status: ${response.status}`);
+    }
+    return response.json();
+  })
+  .then(() => {
+    results[index] = true; // Success
+    console.log(`Successfully synced confirmation ${index + 1} of ${confirmations.length}`);
+  })
+  .catch(err => {
+    results[index] = false; // Failed
+    console.error(`Failed to sync confirmation ${index + 1}: ${err.message}`);
+  })
+  .finally(() => {
+    // Process next one with slight delay to not overload server
+    setTimeout(() => syncNextConfirmation(confirmations, index + 1, results), 500);
+  });
+}
+
+// Start periodic sync
+setupPeriodicSync();

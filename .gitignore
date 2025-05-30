@@ -1,4 +1,5 @@
 tokens
 /snapshots/
+/old_snapshots/
 /output
 test_form.html

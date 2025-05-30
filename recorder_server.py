@@ -1309,5 +1309,31 @@ def fix_json_text(text, html):
     return filtered
 
 
+@app.route('/confirm_suggestion', methods=['POST'])
+def confirm_suggestion():
+    data = request.get_json()
+    print("Received confirmation for:", data.get('field'))
+    
+    # Create a unique filename based on timestamp, field and URL
+    field_name = data.get('field', 'unknown_field')
+    timestamp = data.get('time', int(time.time()))
+    url_part = data.get('url', '')[-30:].replace('/', '_').replace(':', '_')
+    
+    # Create a filename and path
+    filename = f"confirmation_{timestamp}_{field_name}_{url_part}.json"
+    save_path = os.path.join(RUN_SAVE_DIR, filename)
+    
+    # Save the confirmation data
+    with open(save_path, 'w', encoding='utf-8') as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
+    
+    return json.dumps({
+        'status': 'success',
+        'message': f'Confirmation saved to {filename}',
+        'timestamp': timestamp,
+        'field': field_name,
+    }), 200, {'Content-Type': 'application/json'}
+
+
 if __name__ == '__main__':
     app.run(port=5000)

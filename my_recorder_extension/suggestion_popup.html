@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Field Suggestion Editor</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      margin: 20px;
+      line-height: 1.4;
+      color: #333;
+      background-color: #f8f9fa;
+    }
+    .container {
+      max-width: 500px;
+      margin: 0 auto;
+      background-color: white;
+      border-radius: 8px;
+      box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+      padding: 20px;
+    }
+    h2 {
+      margin-top: 0;
+      color: #2c3e50;
+      border-bottom: 1px solid #eee;
+      padding-bottom: 10px;
+    }
+    .field-name {
+      font-weight: bold;
+      margin-bottom: 15px;
+      font-size: 16px;
+    }
+    label {
+      display: block;
+      margin: 12px 0 6px;
+      font-weight: bold;
+    }
+    textarea {
+      width: 100%;
+      height: 80px;
+      margin-bottom: 8px;
+      resize: vertical;
+      padding: 8px;
+      border: 1px solid #ccc;
+      border-radius: 4px;
+      font-family: Arial, sans-serif;
+      font-size: 13px;
+      box-sizing: border-box;
+    }
+    .description-textarea {
+      direction: rtl;
+      text-align: right;
+    }
+    .examples-textarea {
+      direction: ltr;
+      text-align: left;
+    }
+    .button-row {
+      display: flex;
+      justify-content: space-between;
+      gap: 10px;
+      margin-top: 20px;
+    }
+    button {
+      padding: 8px 16px;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 14px;
+      min-width: 80px;
+      transition: background-color 0.2s, transform 0.1s;
+    }
+    button:hover {
+      transform: translateY(-1px);
+    }
+    button:active {
+      transform: translateY(1px);
+    }
+    .cancel-btn {
+      border: 1px solid #ddd;
+      background: #f5f5f5;
+    }
+    .cancel-btn:hover {
+      background: #e5e5e5;
+    }
+    .confirm-btn {
+      border: 1px solid #28a745;
+      background: #28a745;
+      color: white;
+    }    .confirm-btn:hover {
+      background: #218838;
+    }
+    .confirm-btn:disabled {
+      background: #44ff44;
+      cursor: default;
+      color: white;
+    }
+    .confirmed-indicator {
+      color: #28a745;
+      font-weight: bold;
+      margin-left: 10px;
+      animation: fadePulse 2s infinite;
+    }
+    @keyframes fadePulse {
+      0% { opacity: 1; }
+      50% { opacity: 0.7; }
+      100% { opacity: 1; }
+    }
+    .submit-btn {
+      border: 1px solid #007bff;
+      background: #007bff;
+      color: white;
+    }
+    .submit-btn:hover {
+      background: #0069d9;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h2>Edit Description & Examples</h2>
+    <div id="field-info" class="field-name">Field: <span id="field-name"></span></div>
+    
+    <div>
+      <label for="edit-range">Description:</label>
+      <textarea id="edit-range" class="description-textarea"></textarea>
+    </div>
+    
+    <div>
+      <label for="edit-examples">Examples (one per line):</label>
+      <textarea id="edit-examples" class="examples-textarea"></textarea>
+    </div>
+    
+    <div class="button-row">
+      <button id="edit-cancel" class="cancel-btn">Cancel</button>
+      <button id="edit-confirm" class="confirm-btn">Confirm</button>
+      <button id="edit-submit" class="submit-btn">Submit</button>
+    </div>
+  </div>
+
+  <script src="suggestion_popup.js"></script>
+</body>
+</html>

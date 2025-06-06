@@ -1,6 +1,10 @@
 // This file manages the functionality for the suggestion popup window
 // Used in conjunction with suggestion_popup.html
 
+// Track if user has made changes to prevent overwriting
+let userHasEditedRange = false;
+let userHasEditedExamples = false;
+
 // Get query parameters from URL
 function getQueryParams() {
   const params = {};
@@ -69,12 +73,12 @@ function updateUIWithSuggestion(suggestion) {
   // Display field name
   document.getElementById('field-name').textContent = suggestion.name || suggestion.id || '(Unnamed Field)';
   
-  // Set values
-  if (suggestion.range) {
+  // Only update values if user hasn't edited them
+  if (!userHasEditedRange && suggestion.range) {
     document.getElementById('edit-range').value = suggestion.range;
   }
   
-  if (suggestion.examples && Array.isArray(suggestion.examples)) {
+  if (!userHasEditedExamples && suggestion.examples && Array.isArray(suggestion.examples)) {
     document.getElementById('edit-examples').value = suggestion.examples.join('\n');
   }
 }
@@ -86,8 +90,8 @@ function updateUIFromParams() {
   // Display field name
   document.getElementById('field-name').textContent = params.name || params.id || '(Unnamed Field)';
   
-  // Set values if available
-  if (params.range) {
+  // Only set initial values if user hasn't edited them
+  if (!userHasEditedRange && params.range) {
     try {
       document.getElementById('edit-range').value = decodeURIComponent(params.range);
     } catch (e) {
@@ -96,7 +100,7 @@ function updateUIFromParams() {
     }
   }
   
-  if (params.examples) {
+  if (!userHasEditedExamples && params.examples) {
     try {
       const examples = JSON.parse(decodeURIComponent(params.examples));
       document.getElementById('edit-examples').value = examples.join('\n');
@@ -159,10 +163,24 @@ document.addEventListener('DOMContentLoaded', function() {
   
   // First load data from URL parameters (for immediate display)
   updateUIFromParams();
-    // Then try to fetch the latest data from storage
+  
+  // Then try to fetch the latest data from storage
   fetchLatestData();
   
+  // Set up change tracking for text areas
+  const rangeTextarea = document.getElementById('edit-range');
+  const examplesTextarea = document.getElementById('edit-examples');
+  
+  rangeTextarea.addEventListener('input', function() {
+    userHasEditedRange = true;
+  });
+  
+  examplesTextarea.addEventListener('input', function() {
+    userHasEditedExamples = true;
+  });
+  
   // Set up a refresh interval to periodically check for updates
+  // But only update if user hasn't edited the fields
   setInterval(fetchLatestData, 5000); // Check every 5 seconds
   
   // Set up button event handlers

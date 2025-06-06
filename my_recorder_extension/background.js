@@ -26,7 +26,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         sendResponse({ error: 'Invalid suggestion index' });
       }
     });
-    return true; // Keep the message channel open for the async response
+    return true; // Keep the message channel open for async response
   }
   
   if (request.type === 'getSuggestionResponse') {
@@ -39,7 +39,8 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     }
     return true;
   }
-    if (request.type === 'requestSuggestions') {
+  
+  if (request.type === 'requestSuggestions') {
     const requestStartTime = request.startTime || Date.now();
     
     // Handle suggestion request from popup
@@ -66,7 +67,12 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ html: response.html })
         })
-        .then(res => res.json())
+        .then(res => {
+          if (!res.ok) {
+            throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+          }
+          return res.json();
+        })
         .then(data => {
           const serverResponseTime = Date.now();
           const serverDuration = serverResponseTime - serverRequestStartTime;
@@ -87,16 +93,30 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
           // Try to get the array from data
           let arr = data;
           if (data && data.raw) {
-            try { arr = JSON.parse(data.raw); } catch { arr = []; }
+            try { 
+              arr = JSON.parse(data.raw); 
+            } catch (e) { 
+              console.error('Failed to parse suggestions:', e);
+              arr = []; 
+            }
           }
+          
           if (!Array.isArray(arr)) {
             arr = [];
           }
+          
+          // Store suggestions in local storage for popup access
+          chrome.storage.local.set({ currentSuggestions: arr });
           
           // Send suggestions to content script for DOM injection
           chrome.tabs.sendMessage(tabId, { 
             type: 'injectInputSuggestions', 
             suggestions: arr 
+          }, function(injectionResponse) {
+            // Handle injection response (optional)
+            if (chrome.runtime.lastError) {
+              console.warn('Injection message failed:', chrome.runtime.lastError.message);
+            }
           });
           
           sendResponse({ 
@@ -109,6 +129,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
           });
         })
         .catch(err => {
+          console.error('Server request failed:', err);
           const errorTime = Date.now();
           const errorDuration = errorTime - requestStartTime;
           
@@ -120,6 +141,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
               error_duration_ms: errorDuration
             }
           };
+          
           suggestionResponses.set(tabId, errorResponse);
           sendResponse(errorResponse);
         });
@@ -127,6 +149,10 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     });
     return true; // Keep the message channel open for async response
   }
+  
+  // If none of the above conditions match, don't return true
+  // This prevents the "asynchronous response" error for unhandled message types
+  return false;
 });
 
 // Clean up stored responses when tabs are closed

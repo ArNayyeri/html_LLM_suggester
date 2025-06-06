@@ -15,6 +15,29 @@ import tkinter as tk
 from tkinter import ttk, scrolledtext, messagebox
 import threading
 import webbrowser
+import csv
+import math
+from collections import defaultdict
+from itertools import product
+from urllib.parse import urlparse
+import socket
+import sys
+
+
+def check_port_available(port):
+    """Check if a port is available for use"""
+    try:
+        # Create a socket object
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.settimeout(1)  # 1 second timeout
+
+        # Try to bind to the port
+        result = sock.bind(('localhost', port))
+        sock.close()
+        return True
+    except OSError:
+        return False
+
 
 # Use cl100k_base encoding (close approximation for Llama)
 encoding = tiktoken.get_encoding("cl100k_base")
@@ -261,16 +284,24 @@ def suggest_input_values(html):
          'input' and 'type' in el.attrs and el['type'] in valid_types)
     ]
 
-    # Extract IDs (only if they exist)
-    ids = [el['id'] for el in elements if 'id' in el.attrs]
-    # print(f"Found IDs: {ids}")
+    # Extract IDs and names (only if they exist)
+    target_identifiers = []
+    for el in elements:
+        if 'id' in el.attrs:
+            target_identifiers.append(('id', el['id']))
+        elif 'name' in el.attrs:
+            target_identifiers.append(('name', el['name']))
 
     extracted_data = []
-    for target_id in ids:
+    for identifier_type, identifier_value in target_identifiers:
+        if identifier_type == 'id':
+            target_element = soup.find(id=identifier_value)
+        else:  # name
+            target_element = soup.find(attrs={'name': identifier_value})
         # If the web is more than 128k tokens,
         # it will be considered as an input within 100k tokens from where the desired input ID is.
         if count_tokens(html) > 128 * 1024:
-            target_html = truncate_with_context(soup, soup.find(id=target_id))
+            target_html = truncate_with_context(soup, target_element)
         else:
             target_html = html
         # Build the prompt for structured extraction
@@ -278,16 +309,16 @@ def suggest_input_values(html):
         system_msg = {
             "role": "system",
             "content": (
-                "You are an HTML parser. You receive HTML below and process only the element whose id equals the specified value. "
+                "You are an HTML parser. You receive HTML below and process only the element whose id or name equals the specified value. "
                 "For that element, create a JSON object with keys: name, id, type, limitations, and examples. "
                 "- name: The value of the 'name' attribute.\n"
-                "- id: The value of the 'id' attribute.\n"
+                "- id: The value of the 'id' attribute (use the name if id doesn't exist).\n"
                 "- type: Input type (text, password, etc.) or 'textarea'.\n"
                 "- limitations: Validation rules extracted from attributes like minlength, maxlength, pattern, or placeholder. This description should be written in English as complete sentences. Instead of using short phrases like 'minimum 8 English characters', provide a complete explanation. For example: 'The password must be at least 8 characters long. English lowercase or uppercase letters are allowed. Numbers and other common characters can also be used to increase security.'\n"
                 "- examples: 5 example values that match these limitations. Examples should be appropriate for the field context (English or Persian based on the field purpose).\n"
                 "Keep the keys constant but write limitation values in English.\n"
                 "Provide output only as a JSON object matching the Pydantic schema.\n"
-                f"Process only and exclusively the element with id equal to '{target_id}'. Do not include any other element in the output.\n"
+                f"Process only and exclusively the element with {'id' if identifier_type == 'id' else 'name'} equal to '{identifier_value}'. Do not include any other element in the output.\n"
                 "Here are 5 complete examples for understanding:\n\n"
 
                 "Example 1:\n"
@@ -428,8 +459,45 @@ class KatalonTestImprover:
         self.root.title("Katalon Test Improver")
         self.root.geometry("1200x800")
 
+        # Handle window close event
+        self.root.protocol("WM_DELETE_WINDOW", self.on_closing)
+
         self.setup_ui()
         self.get_initial_suggestions()
+
+    def on_closing(self):
+        """Handle window close event and shutdown all applications"""
+        try:
+            # Ask for confirmation
+            if messagebox.askokcancel("Quit", "Do you want to quit? This will close all applications."):
+                print(
+                    "KatalonTestImprover window closed. Shutting down all applications...")
+
+                # Destroy the tkinter window
+                self.root.destroy()
+
+                # Shutdown the Flask server and exit the entire application
+                import threading
+
+                def shutdown_app():
+                    try:
+                        # Send shutdown signal to Flask server
+                        import requests
+                        requests.post(
+                            'http://localhost:5000/shutdown', timeout=1)
+                    except:
+                        pass
+
+                    # Force exit the entire application
+                    os._exit(0)
+
+                # Run shutdown in a separate thread to avoid blocking
+                threading.Thread(target=shutdown_app, daemon=True).start()
+
+        except Exception as e:
+            print(f"Error during shutdown: {e}")
+            # Force exit if normal shutdown fails
+            os._exit(0)
 
     def add_to_chat_history(self, role, content):
         """Add message to chat history for context"""
@@ -1066,7 +1134,7 @@ def convert_to_katalon_format(events):
     if valid_events:
         first_url = valid_events[0].get('url', '')
         if first_url:
-            from urllib.parse import urlparse
+
             parsed = urlparse(first_url)
             base_url = f"{parsed.scheme}://{parsed.netloc}"
 
@@ -1272,40 +1340,8 @@ def fix_json_text(text, html):
     filtered = []
     for field in result:
         field['range'] = field.pop('limitations')
-        # Check if the field exists in HTML as input or textarea
-        field_id = field.get('id', '').replace('#', '')
-        name = field.get('name', '')
-        # Look for <input ... id="..."> or <textarea ... id="...">
-        input_pattern = (
-            rf'<input[^>]*((id=[\'"]{field_id}[\'"])|(name=[\'"]{re.escape(name)}[\'"]))'
-        )
-        textarea_pattern = (
-            rf'<textarea[^>]*((id=[\'"]{field_id}[\'"])|(name=[\'"]{re.escape(name)}[\'"]))'
-        )
-        valid_types = [
-            'text',
-            'password',
-            'email',
-            'number',
-            'date',
-            'textarea',
-            'datetime-local',
-            'month',
-            'range',
-            'search',
-            'tel',
-            'time',
-            'url',
-            'week'
-        ]
-        exists = (
-            re.search(input_pattern, html)
-            or re.search(textarea_pattern, html)
-        )
-        if exists and field['type'] in valid_types:
-            # check not duplicate ID
-            if not any(f['id'] == field['id'] for f in filtered):
-                filtered.append(field)
+        if not any(f['id'] == field['id'] or f['name'] == field['name'] for f in filtered):
+            filtered.append(field)
     return filtered
 
 
@@ -1313,20 +1349,20 @@ def fix_json_text(text, html):
 def confirm_suggestion():
     data = request.get_json()
     print("Received confirmation for:", data.get('field'))
-    
+
     # Create a unique filename based on timestamp, field and URL
     field_name = data.get('field', 'unknown_field')
     timestamp = data.get('time', int(time.time()))
     url_part = data.get('url', '')[-30:].replace('/', '_').replace(':', '_')
-    
+
     # Create a filename and path
     filename = f"confirmation_{timestamp}_{field_name}_{url_part}.json"
     save_path = os.path.join(RUN_SAVE_DIR, filename)
-    
+
     # Save the confirmation data
     with open(save_path, 'w', encoding='utf-8') as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
-    
+
     return json.dumps({
         'status': 'success',
         'message': f'Confirmation saved to {filename}',
@@ -1335,5 +1371,520 @@ def confirm_suggestion():
     }), 200, {'Content-Type': 'application/json'}
 
 
+def generate_test_cases_from_katalon(katalon_path, output_csv_path, num_test_cases):
+    """
+    Generate test cases from Katalon test file using LLM with combinations of all field examples
+
+    Args:
+        katalon_path (str): Path to the Katalon test HTML file
+        output_csv_path (str): Path to save the output CSV file
+        num_test_cases (int): Number of test cases to generate
+    """
+    try:
+        # Read the Katalon test file
+        with open(katalon_path, 'r', encoding='utf-8') as f:
+            katalon_html = f.read()
+
+        # Parse the HTML to extract test commands
+        soup = BeautifulSoup(katalon_html, 'html.parser')
+        table = soup.find('table')
+
+        if not table:
+            print("No table found in Katalon test file")
+            return
+
+        # Extract commands and group by type
+        rows = table.find_all('tr')[1:]  # Skip header row
+        type_commands = defaultdict(list)
+
+        for row in rows:
+            cells = row.find_all('td')
+            if len(cells) >= 3:
+                command = cells[0].get_text().strip()
+                target = cells[1].get_text().strip()
+                value = cells[2].get_text().strip()
+
+                # Only process 'type' commands that have values
+                if command == 'type' and value:
+                    type_commands[target].append({
+                        'command': command,
+                        'target': target,
+                        'value': value
+                    })
+
+        if not type_commands:
+            print("No 'type' commands with values found in Katalon test")
+            return
+
+        print(f"Found {len(type_commands)} different input fields with values")
+
+        # Calculate number of examples per field
+        total_fields = len(type_commands)
+        examples_per_field = max(1, math.ceil(math.log(
+            num_test_cases, total_fields)) if total_fields > 1 else num_test_cases)
+
+        print(f"Generating {examples_per_field} examples per field")
+
+        # Get the directory containing the Katalon file to look for confirmations
+        katalon_dir = os.path.dirname(katalon_path)
+
+        # Collect all field data with examples
+        field_data = {}
+        field_order = []  # To maintain order for CSV headers
+
+        # Process each field
+        for target, commands in type_commands.items():
+            print(f"Processing field: {target}")
+
+            # Get the original value (use the first one if multiple)
+            original_value = commands[0]['value']
+
+            # Determine field type from target
+            field_type = "text"  # default
+            if "password" in target.lower():
+                field_type = "password"
+            elif "email" in target.lower():
+                field_type = "email"
+            elif "phone" in target.lower() or "tel" in target.lower():
+                field_type = "tel"
+            elif "date" in target.lower():
+                field_type = "date"
+            elif "number" in target.lower() or "age" in target.lower():
+                field_type = "number"
+
+            # Look for confirmation files for this field
+            confirmation_data = find_confirmation_for_field(
+                katalon_dir, target)
+
+            if confirmation_data:
+                print(f"Found confirmation data for field: {target}")
+                # Use confirmation data to generate examples
+                generated_examples = generate_examples_from_confirmation(
+                    target, field_type, original_value, confirmation_data.get(
+                        'suggestion', {}), examples_per_field
+                )
+                description = confirmation_data.get(
+                    'range', 'No description available')
+                confirmation_found = True
+            else:
+                print(
+                    f"No confirmation found for field: {target}, using default generation")
+                # Generate examples using default method
+                generated_examples = generate_examples_for_field(
+                    target, field_type, original_value, examples_per_field
+                )
+                description = f"Generated based on field type: {field_type}"
+                confirmation_found = False
+
+            # Store field data
+            field_name = extract_field_identifier(target)
+            field_data[field_name] = {
+                'target': target,
+                'type': field_type,
+                'original_value': original_value,
+                'confirmation_found': confirmation_found,
+                'description': description,
+                'examples': generated_examples
+            }
+            field_order.append(field_name)
+
+        # Generate all combinations of examples
+
+        # Extract examples lists in order
+        examples_lists = [field_data[field]['examples']
+                          for field in field_order]
+
+        # Generate all combinations
+        combinations = list(product(*examples_lists))
+
+        print(
+            f"Generated {len(combinations)} total combinations from {len(field_order)} fields")
+
+        # Limit combinations if too many
+        if len(combinations) > num_test_cases:
+            print(f"Limiting to first {num_test_cases} combinations")
+            combinations = combinations[:num_test_cases]
+
+        # Prepare CSV headers (field names)
+        csv_headers = field_order
+
+        # Prepare CSV data (combinations)
+        csv_data = combinations
+
+        # Save to CSV
+        with open(output_csv_path, 'w', newline='', encoding='utf-8') as csvfile:
+            writer = csv.writer(csvfile)
+            writer.writerow(csv_headers)
+            writer.writerows(csv_data)
+
+        print(f"Test case combinations saved to: {output_csv_path}")
+        print(
+            f"Generated {len(csv_data)} test case combinations with {len(field_order)} fields")
+
+        # Print summary
+        print("\nField Summary:")
+        for field in field_order:
+            data = field_data[field]
+            print(
+                f"  {field}: {len(data['examples'])} examples ({'with confirmation' if data['confirmation_found'] else 'generated'})")
+
+    except Exception as e:
+        print(f"Error generating test cases: {e}")
+
+
+def find_confirmation_for_field(katalon_dir, target):
+    """
+    Find confirmation files for a specific field target
+
+    Args:
+        katalon_dir (str): Directory containing the Katalon file
+        target (str): Target selector (e.g., "id=username", "xpath=//input[@name='email']")
+
+    Returns:
+        dict: Confirmation data if found, None otherwise
+    """
+    try:
+        # Extract field identifier from target
+        field_identifier = extract_field_identifier(target)
+
+        # Look for confirmation files in the directory
+        confirmation_files = []
+        for file in os.listdir(katalon_dir):
+            if file.startswith('confirmation_') and file.endswith('.json'):
+                confirmation_files.append(file)
+
+        # Search through confirmation files for matching field
+        for conf_file in confirmation_files:
+            try:
+                with open(os.path.join(katalon_dir, conf_file), 'r', encoding='utf-8') as f:
+                    conf_data = json.load(f)
+
+                # Check if this confirmation matches our target field
+                conf_field = conf_data.get('field', '')
+                if field_identifier in conf_field or conf_field in field_identifier:
+                    print(f"Found matching confirmation file: {conf_file}")
+                    return conf_data
+
+            except Exception as e:
+                print(f"Error reading confirmation file {conf_file}: {e}")
+                continue
+
+        return None
+
+    except Exception as e:
+        print(f"Error finding confirmation for field {target}: {e}")
+        return None
+
+
+def extract_field_identifier(target):
+    """
+    Extract field identifier from target selector
+
+    Args:
+        target (str): Target selector (e.g., "id=username", "xpath=//input[@name='email']")
+
+    Returns:
+        str: Field identifier
+    """
+    try:
+        if target.startswith('id='):
+            return target.replace('id=', '')
+        elif target.startswith('name='):
+            return target.replace('name=', '')
+        elif 'id=' in target:
+            # Extract from xpath or css selector
+            id_match = re.search(r'id=[\'"]([^\'"]+)[\'"]', target)
+            if id_match:
+                return id_match.group(1)
+        elif 'name=' in target:
+            # Extract from xpath or css selector
+            name_match = re.search(r'name=[\'"]([^\'"]+)[\'"]', target)
+            if name_match:
+                return name_match.group(1)
+
+        return target  # Return as-is if can't extract
+
+    except Exception as e:
+        print(f"Error extracting field identifier from {target}: {e}")
+        return target
+
+
+def generate_examples_for_field(target, field_type, original_value, num_examples):
+    """
+    Generate test examples for a specific field using LLM
+
+    Args:
+        target (str): The target selector of the field
+        field_type (str): The type of the field (text, password, email, etc.)
+        original_value (str): The original value from Katalon test
+        num_examples (int): Number of examples to generate
+
+    Returns:
+        list: Generated example values
+    """
+    try:
+        # Create prompt based on field type and original value
+        prompt = f"""You are a test data generation expert. Generate {num_examples} realistic test examples for a form field.
+
+Field Information:
+- Target: {target}
+- Type: {field_type}
+- Original Example: {original_value}
+
+Requirements:
+1. Generate {num_examples} different realistic values
+2. Values should be appropriate for the field type
+3. Include both valid and edge case examples
+4. Make examples diverse and practical for testing
+5. Consider the original example as a reference for format/style
+
+Field Type Guidelines:
+- text: Various text inputs with different lengths
+- password: Strong passwords with different patterns
+- email: Valid email addresses from different domains
+- tel/phone: Phone numbers in different formats
+- date: Dates in various formats
+- number: Numbers with different ranges
+
+Return only a JSON array of strings:
+["example1", "example2", "example3", ...]
+
+Examples should be realistic and usable for actual testing."""
+
+        # Generate examples using LLM
+        if is_local:
+            response = chat(model="llama3.1",
+                            messages=[{"role": "user", "content": prompt}],
+                            options={"num_ctx": 8192})
+            raw_response = response['message']['content']
+        else:
+            response = client.chat.completions.create(
+                model=model_name,
+                messages=[{"role": "user", "content": prompt}],
+                temperature=0.7,
+                max_tokens=800
+            )
+            raw_response = response.choices[0].message.content
+
+        # Parse JSON response
+        try:
+            # Extract JSON array from response
+            json_match = re.search(r'\[.*\]', raw_response, re.DOTALL)
+            if json_match:
+                json_str = json_match.group(0)
+                examples = json.loads(json_str)
+
+                # Ensure we have the right number of examples
+                if len(examples) >= num_examples:
+                    return examples[:num_examples]
+                else:
+                    # Pad with variations if needed
+                    while len(examples) < num_examples:
+                        examples.append(f"{original_value}_{len(examples)}")
+                    return examples
+            else:
+                raise ValueError("No JSON array found in response")
+
+        except (json.JSONDecodeError, ValueError) as e:
+            print(f"Error parsing LLM response for {target}: {e}")
+            # Fallback: generate simple variations
+            return [f"{original_value}_{i+1}" for i in range(num_examples)]
+
+    except Exception as e:
+        print(f"Error generating examples for {target}: {e}")
+        # Fallback: return variations of original value
+        return [f"{original_value}_{i+1}" for i in range(num_examples)]
+
+
+def generate_examples_from_confirmation(target, field_type, original_value, confirmation_data, num_examples):
+    """
+    Generate test examples using confirmation data (description and existing examples)
+
+    Args:
+        target (str): The target selector of the field
+        field_type (str): The type of the field
+        original_value (str): The original value from Katalon test
+        confirmation_data (dict): Confirmation data containing range and examples
+        num_examples (int): Number of examples to generate
+
+    Returns:
+        list: Generated example values
+    """
+    try:
+        # Get description and existing examples from confirmation
+        description = confirmation_data.get('range', '')
+        existing_examples = confirmation_data.get('examples', [])
+
+        # Translate Persian description to English for LLM processing
+        english_description = description
+        if any('\u0600' <= c <= '\u06FF' for c in description):
+            english_description = translate_to_english(description)
+
+        print(f"Using confirmation description: {description}")
+        print(f"Existing examples: {existing_examples}")
+
+        # If we have enough examples from confirmation, use them directly
+        if len(existing_examples) >= num_examples:
+            print(f"Using existing examples from confirmation")
+            return existing_examples[:num_examples]
+
+        # If we have some examples but need more, generate additional ones
+        examples_needed = num_examples - len(existing_examples)
+
+        prompt = f"""You are a test data generation expert. Generate {examples_needed} additional realistic test examples for a form field.
+
+Field Information:
+- Target: {target}
+- Type: {field_type}
+- Original Example: {original_value}
+- Field Description/Limitations: {english_description}
+
+Existing Examples from User Confirmations:
+{json.dumps(existing_examples, ensure_ascii=False)}
+
+Requirements:
+1. Generate {examples_needed} NEW examples that are DIFFERENT from the existing ones
+2. Follow the same pattern and style as the existing examples
+3. Respect the field description/limitations: {english_description}
+4. Make examples realistic and practical for testing
+5. Ensure examples are compatible with the field type: {field_type}
+
+Guidelines based on existing examples:
+- Analyze the format, length, and pattern of existing examples
+- Generate similar but not identical values
+- Maintain consistency with the field's purpose and limitations
+
+Return only a JSON array of {examples_needed} NEW strings:
+["new_example1", "new_example2", ...]
+
+The new examples should complement the existing ones while following the same validation rules."""
+
+        # Generate additional examples using LLM
+        if is_local:
+            response = chat(model="llama3.1",
+                            messages=[{"role": "user", "content": prompt}],
+                            options={"num_ctx": 8192})
+            raw_response = response['message']['content']
+        else:
+            response = client.chat.completions.create(
+                model=model_name,
+                messages=[{"role": "user", "content": prompt}],
+                temperature=0.7,
+                max_tokens=800
+            )
+            raw_response = response.choices[0].message.content
+
+        # Parse JSON response
+        try:
+            # Extract JSON array from response
+            json_match = re.search(r'\[.*\]', raw_response, re.DOTALL)
+            if json_match:
+                json_str = json_match.group(0)
+                new_examples = json.loads(json_str)
+
+                # Combine existing examples with new ones
+                all_examples = existing_examples + \
+                    new_examples[:examples_needed]
+
+                # Remove duplicates while preserving order
+                seen = set()
+                unique_examples = []
+                for example in all_examples:
+                    if example not in seen:
+                        seen.add(example)
+                        unique_examples.append(example)
+
+                return unique_examples[:num_examples]
+            else:
+                raise ValueError("No JSON array found in response")
+
+        except (json.JSONDecodeError, ValueError) as e:
+            print(f"Error parsing LLM response for {target}: {e}")
+            # Fallback: combine existing examples with simple variations
+            fallback_examples = existing_examples[:]
+            for i in range(examples_needed):
+                if existing_examples:
+                    # Create variations of existing examples
+                    base_example = existing_examples[i % len(
+                        existing_examples)]
+                    fallback_examples.append(f"{base_example}_{i+1}")
+                else:
+                    fallback_examples.append(f"{original_value}_{i+1}")
+
+            return fallback_examples[:num_examples]
+
+    except Exception as e:
+        print(f"Error generating examples from confirmation for {target}: {e}")
+        # Fallback to default generation method
+        return generate_examples_for_field(target, field_type, original_value, num_examples)
+
+
+# Add a route to trigger test case generation
+@app.route('/generate_test_cases', methods=['POST'])
+def generate_test_cases_endpoint():
+    """API endpoint to generate test cases from Katalon file"""
+    try:
+        data = request.get_json()
+        katalon_path = data.get('katalon_path')
+        output_csv_path = data.get('output_csv_path')
+        num_test_cases = data.get('num_test_cases', 10)
+
+        if not katalon_path or not output_csv_path:
+            return json.dumps({
+                'error': 'katalon_path and output_csv_path are required'
+            }), 400, {'Content-Type': 'application/json'}
+
+        # Generate test cases
+        generate_test_cases_from_katalon(
+            katalon_path, output_csv_path, num_test_cases)
+
+        return json.dumps({
+            'status': 'success',
+            'message': f'Test cases generated and saved to {output_csv_path}',
+            'num_test_cases': num_test_cases
+        }), 200, {'Content-Type': 'application/json'}
+
+    except Exception as e:
+        return json.dumps({
+            'error': f'Error generating test cases: {str(e)}'
+        }), 500, {'Content-Type': 'application/json'}
+
+
+# Add shutdown route to Flask app
+@app.route('/shutdown', methods=['POST'])
+def shutdown():
+    """Shutdown the Flask application"""
+    try:
+        print("Shutdown request received. Closing Flask server...")
+        func = request.environ.get('werkzeug.server.shutdown')
+        if func is None:
+            # Alternative shutdown method
+            os._exit(0)
+        else:
+            func()
+        return 'Server shutting down...'
+    except Exception as e:
+        print(f"Error during Flask shutdown: {e}")
+        os._exit(0)
+
+
 if __name__ == '__main__':
-    app.run(port=5000)
+    port = 5000
+
+    # Check if port is available
+    if not check_port_available(port):
+        print(f"Error: Port {port} is already in use!")
+        print(
+            f"Please close the application using port {port} or use a different port.")
+        exit(1)
+
+    print(f"Starting server on port {port}...")
+
+    try:
+        app.run(port=port, debug=False)
+    except KeyboardInterrupt:
+        print("\nApplication interrupted by user")
+        sys.exit(0)
+    except Exception as e:
+        print(f"Error running Flask app: {e}")
+        sys.exit(1)

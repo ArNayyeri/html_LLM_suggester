@@ -234,93 +234,165 @@
       injectInputSuggestionButtons(request.suggestions);
     }
     return true;
-  });  function injectInputSuggestionButtons(suggestions) {
-    // Save the current suggestions to chrome storage for access when handling popup window messages
-    chrome.storage.local.set({ currentSuggestions: suggestions });
-    
-    // Remove old buttons if any
+  }); function injectInputSuggestionButtons(suggestions) {
+    // Remove any existing suggestion buttons first
     document.querySelectorAll('.input-suggestion-btn').forEach(btn => btn.remove());
+
     suggestions.forEach((item, idx) => {
-      let el = null;
-      if (item.id && document.getElementById(item.id)) {
-        el = document.getElementById(item.id);
-      } else if (item.name && document.querySelector(`[name="${item.name}"]`)) {
-        el = document.querySelector(`[name="${item.name}"]`);
-      }
+      const el = document.getElementById(item.id) || document.querySelector(`[name="${item.name}"]`);
       if (!el) return;
 
       const btn = document.createElement('button');
       btn.textContent = '?';
       btn.className = 'input-suggestion-btn';
       btn.setAttribute('data-idx', idx);
-      
-      // Complete CSS isolation to prevent host page interference
+
+      // Enhanced CSS for better visibility
       btn.style.cssText = `
-        margin: 0 0 0 4px !important;
-        padding: 2px 6px !important;
-        font-size: 12px !important;
-        font-family: Arial, sans-serif !important;
-        font-weight: normal !important;
-        line-height: 1 !important;
-        vertical-align: middle !important;
-        border: 1px solid #ccc !important;
-        border-radius: 3px !important;
-        background-color: #f0f0f0 !important;
-        color: #333 !important;
-        cursor: pointer !important;
-        display: inline-block !important;
-        text-decoration: none !important;
-        text-align: center !important;
-        white-space: nowrap !important;
-        box-sizing: border-box !important;
-        min-width: 20px !important;
-        height: auto !important;
-        outline: none !important;
-        position: relative !important;
-        z-index: 9999 !important;
-        box-shadow: none !important;
-        text-shadow: none !important;
-        text-transform: none !important;
-        letter-spacing: normal !important;
-        word-spacing: normal !important;
-        float: none !important;
-        clear: none !important;
-        opacity: 1 !important;
-        visibility: visible !important;
-        overflow: visible !important;
-        transform: none !important;
-        transition: background-color 0.2s ease !important;
-      `;
+      all: initial !important;
+      font-family: Arial, sans-serif !important;
+      font-size: 14px !important;
+      font-weight: bold !important;
+      line-height: 1 !important;
       
-      btn.title = 'Show input info';
-        // Add hover effects with event listeners to ensure they work
-      btn.addEventListener('mouseenter', function() {
-        // Only change color on hover if no state is set
-        if (!this.getAttribute('data-state')) {
-          this.style.setProperty('background-color', '#e0e0e0', 'important');
+      /* Size and positioning */
+      width: 24px !important;
+      height: 24px !important;
+      min-width: 24px !important;
+      min-height: 24px !important;
+      max-width: 24px !important;
+      max-height: 24px !important;
+      
+      /* Visual appearance */
+      background: linear-gradient(135deg, #007bff 0%, #0056b3 100%) !important;
+      color: white !important;
+      border: 2px solid #ffffff !important;
+      border-radius: 50% !important;
+      
+      /* Shadow for visibility */
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3), 
+                  0 0 0 1px rgba(0, 123, 255, 0.5) !important;
+      
+      /* Positioning */
+      position: absolute !important;
+      z-index: 999999 !important;
+      
+      /* Layout */
+      display: inline-flex !important;
+      align-items: center !important;
+      justify-content: center !important;
+      
+      /* Interaction */
+      cursor: pointer !important;
+      user-select: none !important;
+      
+      /* Reset all possible inherited styles */
+      margin: 0 !important;
+      padding: 0 !important;
+      text-decoration: none !important;
+      text-align: center !important;
+      vertical-align: baseline !important;
+      white-space: nowrap !important;
+      
+      /* Transitions */
+      transition: all 0.2s ease !important;
+      
+      /* Ensure visibility */
+      opacity: 1 !important;
+      visibility: visible !important;
+      overflow: visible !important;
+      transform: none !important;
+      
+      /* Text properties */
+      text-shadow: none !important;
+      text-transform: none !important;
+      letter-spacing: normal !important;
+      word-spacing: normal !important;
+      
+      /* Box model */
+      box-sizing: border-box !important;
+      float: none !important;
+      clear: none !important;
+    `;
+
+      // Position the button relative to the input field
+      const positionButton = () => {
+        const rect = el.getBoundingClientRect();
+        const scrollTop = window.pageYOffset || document.documentElement.scrollTop;
+        const scrollLeft = window.pageXOffset || document.documentElement.scrollLeft;
+
+        // Position to the right of the input field with some margin
+        btn.style.setProperty('top', `${rect.top + scrollTop + (rect.height - 24) / 2}px`, 'important');
+        btn.style.setProperty('left', `${rect.right + scrollLeft + 8}px`, 'important');
+      };
+
+      // Initial positioning
+      positionButton();
+
+      // Reposition on scroll and resize
+      const repositionHandler = () => {
+        if (document.contains(el) && document.contains(btn)) {
+          positionButton();
+        }
+      };
+
+      window.addEventListener('scroll', repositionHandler);
+      window.addEventListener('resize', repositionHandler);
+
+      btn.title = 'Click to edit field suggestions';
+
+      // Enhanced hover effects
+      btn.addEventListener('mouseenter', function () {
+        const state = this.getAttribute('data-state');
+        if (!state) {
+          this.style.setProperty('transform', 'scale(1.1)', 'important');
+          this.style.setProperty('box-shadow', '0 3px 12px rgba(0, 0, 0, 0.4), 0 0 0 2px rgba(0, 123, 255, 0.8)', 'important');
         }
       });
-      
-      btn.addEventListener('mouseleave', function() {
-        // Keep the current background color based on state
+
+      btn.addEventListener('mouseleave', function () {
         const state = this.getAttribute('data-state');
         if (state === 'confirmed' || state === 'submitted') {
-          // Keep green
-          this.style.setProperty('background-color', '#44ff44', 'important');
-          this.style.setProperty('color', 'white', 'important');
+          this.style.setProperty('background', 'linear-gradient(135deg, #28a745 0%, #1e7e34 100%)', 'important');
+          this.style.setProperty('transform', 'scale(1)', 'important');
+          this.style.setProperty('box-shadow', '0 2px 8px rgba(0, 0, 0, 0.3), 0 0 0 1px rgba(40, 167, 69, 0.5)', 'important');
         } else if (state === 'cancelled' || state === 'failed') {
-          // Keep red
-          this.style.setProperty('background-color', '#ff4444', 'important');
-          this.style.setProperty('color', 'white', 'important');
+          this.style.setProperty('background', 'linear-gradient(135deg, #dc3545 0%, #bd2130 100%)', 'important');
+          this.style.setProperty('transform', 'scale(1)', 'important');
+          this.style.setProperty('box-shadow', '0 2px 8px rgba(0, 0, 0, 0.3), 0 0 0 1px rgba(220, 53, 69, 0.5)', 'important');
         } else {
-          // Return to default
-          this.style.setProperty('background-color', '#f0f0f0', 'important');
-          this.style.setProperty('color', '#333', 'important');
+          this.style.setProperty('transform', 'scale(1)', 'important');
+          this.style.setProperty('box-shadow', '0 2px 8px rgba(0, 0, 0, 0.3), 0 0 0 1px rgba(0, 123, 255, 0.5)', 'important');
         }
-      });        btn.onclick = (e) => {
+      });
+
+      // State-based styling
+      const updateButtonState = (state) => {
+        btn.setAttribute('data-state', state);
+        switch (state) {
+          case 'confirmed':
+          case 'submitted':
+            btn.style.setProperty('background', 'linear-gradient(135deg, #28a745 0%, #1e7e34 100%)', 'important');
+            btn.style.setProperty('border-color', '#ffffff', 'important');
+            btn.style.setProperty('box-shadow', '0 2px 8px rgba(0, 0, 0, 0.3), 0 0 0 1px rgba(40, 167, 69, 0.5)', 'important');
+            break;
+          case 'cancelled':
+          case 'failed':
+            btn.style.setProperty('background', 'linear-gradient(135deg, #dc3545 0%, #bd2130 100%)', 'important');
+            btn.style.setProperty('border-color', '#ffffff', 'important');
+            btn.style.setProperty('box-shadow', '0 2px 8px rgba(0, 0, 0, 0.3), 0 0 0 1px rgba(220, 53, 69, 0.5)', 'important');
+            break;
+          default:
+            btn.style.setProperty('background', 'linear-gradient(135deg, #007bff 0%, #0056b3 100%)', 'important');
+            btn.style.setProperty('border-color', '#ffffff', 'important');
+            btn.style.setProperty('box-shadow', '0 2px 8px rgba(0, 0, 0, 0.3), 0 0 0 1px rgba(0, 123, 255, 0.5)', 'important');
+        }
+      };
+
+      btn.onclick = (e) => {
         e.stopPropagation();
         e.preventDefault();
-        
+
         // Record question mark button click event
         const questionMarkClickTime = Date.now();
         record({
@@ -338,9 +410,7 @@
           field_type: item.type || '',
           suggestion_index: idx
         });
-        
-        // Many browsers block popups unless they're triggered directly by a user action
-        // So we need to call showEditModal directly from the click event handler
+
         try {
           showEditModal(item, idx, suggestions, questionMarkClickTime);
         } catch (err) {
@@ -348,14 +418,253 @@
           alert('Failed to open popup window. Please check if popup blocking is enabled.');
         }
       };
-      
-      el.parentNode.insertBefore(btn, el.nextSibling);
+
+      // Append to body instead of next to the element to avoid layout issues
+      document.body.appendChild(btn);
+
+      // Store reference for state updates
+      btn.updateState = updateButtonState;
     });
-  }  function showEditModal(item, idx, suggestions, questionMarkClickTime) {
+  }  // Move the message listener setup outside the showEditModal function to ensure it's always available
+  if (!window.hasSetupMessageListener) {
+    window.hasSetupMessageListener = true;
+
+    window.addEventListener('message', function (event) {
+      // Process messages from popup windows
+      if (event.data && event.data.action) {
+        const eventData = event.data;
+        const itemInfo = eventData.itemInfo;
+
+        if (!itemInfo) return;
+
+        // Find the relevant suggestion
+        let suggestion = null;
+        let suggestionIdx = itemInfo.idx;
+        let actualItem = null;
+
+        // Get the button element to change its color
+        const buttonElement = document.querySelector(`.input-suggestion-btn[data-idx="${suggestionIdx}"]`);
+
+        if (!buttonElement) {
+          console.error('Button element not found for index:', suggestionIdx);
+          return;
+        }
+
+        // Handle different actions
+        switch (eventData.action) {
+          case 'cancelEdit':
+            console.log('Processing cancel edit for button:', suggestionIdx);
+
+            // Record cancel event
+            record({
+              type: 'suggestion_modal_cancel',
+              time: eventData.time,
+              url: window.location.href,
+              tag: 'BUTTON',
+              id: 'edit-cancel',
+              class: 'modal-button',
+              value: null,
+              x: null,
+              y: null,
+              xpath: null,
+              field_name: itemInfo.name || '',
+              field_type: itemInfo.type || '',
+              suggestion_index: suggestionIdx
+            });
+
+            // Force button color to red when cancelled
+            buttonElement.setAttribute('data-state', 'cancelled');
+            buttonElement.style.setProperty('background', 'linear-gradient(135deg, #dc3545 0%, #bd2130 100%)', 'important');
+            buttonElement.style.setProperty('border-color', '#ffffff', 'important');
+            buttonElement.style.setProperty('box-shadow', '0 2px 8px rgba(0, 0, 0, 0.3), 0 0 0 1px rgba(220, 53, 69, 0.5)', 'important');
+
+            // Also update using the updateState function if available
+            if (buttonElement.updateState) {
+              buttonElement.updateState('cancelled');
+            }
+            break;
+
+          case 'confirmEdit':
+            console.log('Processing confirm edit for button:', suggestionIdx);
+
+            // Record confirm event
+            record({
+              type: 'suggestion_modal_confirm',
+              time: eventData.time,
+              url: window.location.href,
+              tag: 'BUTTON',
+              id: 'edit-confirm',
+              class: 'modal-button',
+              value: null,
+              x: null,
+              y: null,
+              xpath: null,
+              field_name: itemInfo.name || '',
+              field_type: itemInfo.type || '',
+              suggestion_index: suggestionIdx
+            });
+
+            // Force button color to green when confirmed
+            buttonElement.setAttribute('data-state', 'confirmed');
+            buttonElement.style.setProperty('background', 'linear-gradient(135deg, #28a745 0%, #1e7e34 100%)', 'important');
+            buttonElement.style.setProperty('border-color', '#ffffff', 'important');
+            buttonElement.style.setProperty('box-shadow', '0 2px 8px rgba(0, 0, 0, 0.3), 0 0 0 1px rgba(40, 167, 69, 0.5)', 'important');
+
+            // Also update using the updateState function if available
+            if (buttonElement.updateState) {
+              buttonElement.updateState('confirmed');
+            }
+
+            // Send confirmation to Python backend (existing code)
+            chrome.storage.local.get({ currentSuggestions: [] }, function (result) {
+              const currentSuggestions = result.currentSuggestions || [];
+              if (suggestionIdx < currentSuggestions.length) {
+                suggestion = currentSuggestions[suggestionIdx];
+
+                const confirmData = {
+                  field: itemInfo.name || itemInfo.id,
+                  time: eventData.time,
+                  url: window.location.href,
+                  suggestion_index: suggestionIdx,
+                  suggestion: suggestion
+                };
+
+                fetch('http://localhost:5000/confirm_suggestion', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify(confirmData)
+                })
+                  .then(res => res.json())
+                  .then(data => {
+                    console.log('Confirmation successfully sent to backend:', data);
+
+                    // Show success notification
+                    const notification = document.createElement('div');
+                    notification.style.cssText = `
+                  position: fixed;
+                  bottom: 20px;
+                  right: 20px;
+                  background-color: #28a745;
+                  color: white;
+                  padding: 10px 15px;
+                  border-radius: 4px;
+                  z-index: 999999;
+                  box-shadow: 0 2px 5px rgba(0,0,0,0.2);
+                `;
+                    notification.innerHTML = '<strong>Confirmation saved!</strong>';
+                    document.body.appendChild(notification);
+
+                    setTimeout(() => {
+                      if (notification.parentNode) {
+                        notification.parentNode.removeChild(notification);
+                      }
+                    }, 3000);
+                  })
+                  .catch(error => {
+                    console.error('Failed to send confirmation to backend:', error);
+                  });
+              }
+            });
+            break;
+
+          case 'submitEdit':
+            console.log('Processing submit edit for button:', suggestionIdx);
+
+            // Record submit start event
+            record({
+              type: 'suggestion_modal_submit_start',
+              time: eventData.time,
+              url: window.location.href,
+              tag: 'BUTTON',
+              id: 'edit-submit',
+              class: 'modal-button',
+              value: null,
+              x: null,
+              y: null,
+              xpath: null,
+              field_name: itemInfo.name || '',
+              field_type: itemInfo.type || '',
+              suggestion_index: suggestionIdx
+            });
+
+            // Get the values from the message
+            const newRange = eventData.data.range;
+            const newExamples = eventData.data.examples;
+
+            // Send to backend
+            fetch('http://localhost:5000/update_input_suggestion', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                field: itemInfo.name || itemInfo.id,
+                range: newRange,
+                examples: newExamples
+              })
+            })
+              .then(res => res.json())
+              .then(data => {
+                console.log('Submit successful for button:', suggestionIdx);
+
+                // Force button color to green when submitted successfully
+                buttonElement.setAttribute('data-state', 'submitted');
+                buttonElement.style.setProperty('background', 'linear-gradient(135deg, #28a745 0%, #1e7e34 100%)', 'important');
+                buttonElement.style.setProperty('border-color', '#ffffff', 'important');
+                buttonElement.style.setProperty('box-shadow', '0 2px 8px rgba(0, 0, 0, 0.3), 0 0 0 1px rgba(40, 167, 69, 0.5)', 'important');
+
+                // Also update using the updateState function if available
+                if (buttonElement.updateState) {
+                  buttonElement.updateState('submitted');
+                }
+
+                // Show success notification
+                const notification = document.createElement('div');
+                notification.style.cssText = `
+              position: fixed;
+              top: 20px;
+              right: 20px;
+              background: #28a745;
+              color: white;
+              padding: 15px 20px;
+              border-radius: 5px;
+              z-index: 999999;
+              box-shadow: 0 3px 10px rgba(0,0,0,0.2);
+            `;
+                notification.innerHTML = '<strong>Suggestion updated successfully!</strong>';
+                document.body.appendChild(notification);
+
+                setTimeout(() => {
+                  if (notification.parentNode) {
+                    notification.parentNode.removeChild(notification);
+                  }
+                }, 3000);
+              })
+              .catch(error => {
+                console.error('Submit failed for button:', suggestionIdx);
+
+                // Force button color to red when submission fails
+                buttonElement.setAttribute('data-state', 'failed');
+                buttonElement.style.setProperty('background', 'linear-gradient(135deg, #dc3545 0%, #bd2130 100%)', 'important');
+                buttonElement.style.setProperty('border-color', '#ffffff', 'important');
+                buttonElement.style.setProperty('box-shadow', '0 2px 8px rgba(0, 0, 0, 0.3), 0 0 0 1px rgba(220, 53, 69, 0.5)', 'important');
+
+                // Also update using the updateState function if available
+                if (buttonElement.updateState) {
+                  buttonElement.updateState('failed');
+                }
+
+                alert('Failed to send to backend.');
+              });
+            break;
+        }
+      }
+    });
+  }
+
+  function showEditModal(item, idx, suggestions, questionMarkClickTime) {
     // Record modal open event
     const modalOpenTime = Date.now();
     const modalOpenDuration = modalOpenTime - questionMarkClickTime;
-    
+
     record({
       type: 'suggestion_modal_open',
       time: modalOpenTime,
@@ -372,25 +681,25 @@
       suggestion_index: idx,
       open_delay_ms: modalOpenDuration
     });
-    
+
     // Always get the most recent data from storage
-    chrome.storage.local.get({ currentSuggestions: [] }, function(result) {
+    chrome.storage.local.get({ currentSuggestions: [] }, function (result) {
       const currentSuggestions = result.currentSuggestions || [];
       let currentItem = item;
-      
+
       // Use the most up-to-date data if available
       if (currentSuggestions.length > idx) {
         const storedItem = currentSuggestions[idx];
         // Only update if we have the same field to avoid confusion
-        if ((storedItem.id && storedItem.id === item.id) || 
-            (storedItem.name && storedItem.name === item.name)) {
+        if ((storedItem.id && storedItem.id === item.id) ||
+          (storedItem.name && storedItem.name === item.name)) {
           currentItem = storedItem;
         }
       }
-      
+
       // Create URL for the popup with data in query parameters
       const extensionURL = chrome.runtime.getURL('suggestion_popup.html');
-      
+
       // Build URL with parameters
       const params = new URLSearchParams();
       params.append('id', currentItem.id || '');
@@ -398,432 +707,37 @@
       params.append('type', currentItem.type || '');
       params.append('idx', idx.toString());
       params.append('timestamp', Date.now().toString()); // Add timestamp to prevent caching
-      
+
       // Add the range and examples if available
       if (currentItem.range) {
         params.append('range', currentItem.range);
       }
-      
+
       if (currentItem.examples && currentItem.examples.length > 0) {
         params.append('examples', JSON.stringify(currentItem.examples));
       }
-      
+
       const popupURL = `${extensionURL}?${params.toString()}`;
-      
-      // Open popup window with specified size and position
+
+      // Open popup window
       const popupWidth = 550;
       const popupHeight = 450;
       const left = (window.screen.width / 2) - (popupWidth / 2);
       const top = (window.screen.height / 2) - (popupHeight / 2);
-        // Check for existing popup with the same name
-      let popupWindow;
-      try {
-        // Use a different window name each time to prevent caching issues
-        const uniqueWindowName = `edit_field_${idx}_${Date.now()}`;
-        
-        // First, try to close any existing window
-        const existingWindow = window.open('', `edit_field_${idx}`);
-        if (existingWindow && !existingWindow.closed) {
-          existingWindow.close();
-        }
-        
-        // Create the popup window
-        popupWindow = window.open(
-          popupURL, 
-          uniqueWindowName, 
-          `width=${popupWidth},height=${popupHeight},left=${left},top=${top},resizable=yes,scrollbars=yes,status=no,location=no,menubar=no,toolbar=no`
-        );
-      } catch (e) {
-        console.error("Error with popup window:", e);
-        
-        // Create a new popup as fallback
-        popupWindow = window.open(
-          popupURL, 
-          `edit_field_${idx}_${Math.random().toString(36).substring(2, 9)}`, 
-          `width=${popupWidth},height=${popupHeight},left=${left},top=${top},resizable=yes,scrollbars=yes,status=no,location=no,menubar=no,toolbar=no`
-        );
-      }
-      
+
+      const uniqueWindowName = `edit_field_${idx}_${Date.now()}`;
+
+      const popupWindow = window.open(
+        popupURL,
+        uniqueWindowName,
+        `width=${popupWidth},height=${popupHeight},left=${left},top=${top},resizable=yes,scrollbars=yes,status=no,location=no,menubar=no,toolbar=no`
+      );
+
       if (popupWindow) {
         popupWindow.focus();
       } else {
         alert('Popup window was blocked. Please allow popups for this website.');
       }
     });
-    
-    // Get the button element to change its color based on action from popup
-    const buttonElement = document.querySelector(`.input-suggestion-btn[data-idx="${idx}"]`);// Add window message listener for messages from the popup window
-    // Since we're using a global function, add a one-time setup if not already set
-    if (!window.hasSetupMessageListener) {
-      window.hasSetupMessageListener = true;
-      
-      window.addEventListener('message', function(event) {
-        // Process messages from popup windows
-        if (event.data && event.data.action) {
-          const eventData = event.data;
-          const itemInfo = eventData.itemInfo;
-          
-          if (!itemInfo) return;
-          
-          // Find the relevant suggestion
-          let suggestion = null;
-          let suggestionIdx = itemInfo.idx;
-          let actualItem = null;
-          
-          // Try to find the actual suggestion item
-          chrome.storage.local.get({ currentSuggestions: [] }, function(result) {
-            const currentSuggestions = result.currentSuggestions || [];
-            if (suggestionIdx < currentSuggestions.length) {
-              suggestion = currentSuggestions[suggestionIdx];
-              
-              // Find the HTML element
-              if (itemInfo.id) {
-                actualItem = document.getElementById(itemInfo.id);
-              } else if (itemInfo.name) {
-                actualItem = document.querySelector(`[name="${itemInfo.name}"]`);
-              }
-              
-              // Get the button element to change its color
-              const buttonElement = document.querySelector(`.input-suggestion-btn[data-idx="${suggestionIdx}"]`);
-              
-              // Handle different actions
-              switch (eventData.action) {
-                case 'cancelEdit':
-                  const cancelTime = eventData.time;
-                  
-                  // Record cancel event
-                  record({
-                    type: 'suggestion_modal_cancel',
-                    time: cancelTime,
-                    url: window.location.href,
-                    tag: 'BUTTON',
-                    id: 'edit-cancel',
-                    class: 'modal-button',
-                    value: null,
-                    x: null,
-                    y: null,
-                    xpath: null,
-                    field_name: itemInfo.name || '',
-                    field_type: itemInfo.type || '',
-                    suggestion_index: suggestionIdx
-                  });
-                  
-                  // Change button color to red when cancelled
-                  if (buttonElement) {
-                    buttonElement.style.setProperty('background-color', '#ff4444', 'important');
-                    buttonElement.style.setProperty('color', 'white', 'important');
-                    // Store state for hover effect
-                    buttonElement.setAttribute('data-state', 'cancelled');
-                  }
-                  break;
-                  
-                case 'confirmEdit':
-                  const confirmTime = eventData.time;
-                  
-                  // Record confirm event
-                  record({
-                    type: 'suggestion_modal_confirm',
-                    time: confirmTime,
-                    url: window.location.href,
-                    tag: 'BUTTON',
-                    id: 'edit-confirm',
-                    class: 'modal-button',
-                    value: null,
-                    x: null,
-                    y: null,
-                    xpath: null,
-                    field_name: itemInfo.name || '',
-                    field_type: itemInfo.type || '',
-                    suggestion_index: suggestionIdx
-                  });
-                  
-                  // Change button color to green when confirmed
-                  if (buttonElement) {
-                    buttonElement.style.setProperty('background-color', '#44ff44', 'important');
-                    buttonElement.style.setProperty('color', 'white', 'important');
-                    // Store state for hover effect
-                    buttonElement.setAttribute('data-state', 'confirmed');
-                  }
-                  
-                  // Send confirmation to Python backend
-                  const confirmData = {
-                    field: itemInfo.name || itemInfo.id,
-                    time: confirmTime,
-                    url: window.location.href,
-                    suggestion_index: suggestionIdx,
-                    suggestion: suggestion
-                  };
-                  
-                  fetch('http://localhost:5000/confirm_suggestion', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(confirmData)
-                  })
-                  .then(res => res.json())
-                  .then(data => {
-                    console.log('Confirmation successfully sent to backend:', data);
-                    
-                    // Record the successful confirmation persistence
-                    record({
-                      type: 'suggestion_confirmation_saved',
-                      time: Date.now(),
-                      url: window.location.href,
-                      field_name: itemInfo.name || '',
-                      field_id: itemInfo.id || '',
-                      suggestion_index: suggestionIdx,
-                      server_response: data
-                    });
-                    
-                    // Show success notification
-                    try {
-                      const notification = document.createElement('div');
-                      notification.style.cssText = `
-                        position: fixed;
-                        bottom: 20px;
-                        right: 20px;
-                        background-color: #44ff44;
-                        color: white;
-                        padding: 10px 15px;
-                        border-radius: 4px;
-                        z-index: 10000;
-                        box-shadow: 0 2px 5px rgba(0,0,0,0.2);
-                      `;
-                      notification.innerHTML = `
-                        <div>
-                          <strong>Confirmation saved!</strong>
-                          <span style="margin-left: 10px; cursor: pointer; font-weight: bold;">ⓘ</span>
-                        </div>
-                      `;
-                      
-                      document.body.appendChild(notification);
-                      
-                      // Remove after 3 seconds
-                      setTimeout(() => {
-                        if (notification.parentNode) {
-                          notification.parentNode.removeChild(notification);
-                        }
-                      }, 3000);
-                    } catch (e) {
-                      console.error('Error showing notification:', e);
-                    }
-                  })
-                  .catch(error => {
-                    console.error('Failed to send confirmation to backend:', error);
-                    
-                    // Record failure
-                    record({
-                      type: 'suggestion_confirmation_failed',
-                      time: Date.now(),
-                      url: window.location.href,
-                      field_name: itemInfo.name || '',
-                      field_id: itemInfo.id || '',
-                      suggestion_index: suggestionIdx,
-                      error: error.message
-                    });
-                    
-                    // Store failed confirmation for retry later
-                    chrome.storage.local.get({ failedConfirmations: [] }, function(result) {
-                      const failedConfirmations = result.failedConfirmations || [];
-                      failedConfirmations.push(confirmData);
-                      chrome.storage.local.set({ failedConfirmations: failedConfirmations });
-                    });
-                  });
-                  break;
-                  
-                case 'submitEdit':
-                  const submitStartTime = eventData.time;
-                  
-                  // Record submit start event
-                  record({
-                    type: 'suggestion_modal_submit_start',
-                    time: submitStartTime,
-                    url: window.location.href,
-                    tag: 'BUTTON',
-                    id: 'edit-submit',
-                    class: 'modal-button',
-                    value: null,
-                    x: null,
-                    y: null,
-                    xpath: null,
-                    field_name: itemInfo.name || '',
-                    field_type: itemInfo.type || '',
-                    suggestion_index: suggestionIdx
-                  });
-                  
-                  // Get the values from the message
-                  const newRange = eventData.data.range;
-                  const newExamples = eventData.data.examples;
-                  
-                  // Update the suggestion in memory
-                  currentSuggestions[suggestionIdx].range = newRange;
-                  currentSuggestions[suggestionIdx].examples = newExamples;
-                  chrome.storage.local.set({ currentSuggestions: currentSuggestions });
-                  
-                  // Send to backend
-                  fetch('http://localhost:5000/update_input_suggestion', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                      field: itemInfo.name || itemInfo.id,
-                      range: newRange,
-                      examples: newExamples
-                    })
-                  }).then(res => res.json())
-                  .then(data => {
-                    const submitEndTime = Date.now();
-                    const submitDuration = submitEndTime - submitStartTime;
-                    
-                    // Record submit success event
-                    record({
-                      type: 'suggestion_modal_submit_success',
-                      time: submitEndTime,
-                      url: window.location.href,
-                      tag: 'BUTTON',
-                      id: 'edit-submit',
-                      class: 'modal-button',
-                      value: null,
-                      x: null,
-                      y: null,
-                      xpath: null,
-                      field_name: itemInfo.name || '',
-                      field_type: itemInfo.type || '',
-                      suggestion_index: suggestionIdx,
-                      submit_duration_ms: submitDuration,
-                      server_response: data
-                    });
-                    
-                    // Change button color to green when submitted successfully
-                    if (buttonElement) {
-                      buttonElement.style.setProperty('background-color', '#44ff44', 'important');
-                      buttonElement.style.setProperty('color', 'white', 'important');
-                      // Store state for hover effect
-                      buttonElement.setAttribute('data-state', 'submitted');
-                    }
-                      if (data && Array.isArray(data.new_examples) && data.new_examples.length > 0) {
-                      // Update the examples in memory
-                      currentSuggestions[suggestionIdx].examples = data.new_examples;
-                      
-                      // Update the range if the server generated one
-                      if (data.range) {
-                        currentSuggestions[suggestionIdx].range = data.range;
-                      }
-                        // Save updated suggestions and trigger update in any open popup windows
-                      chrome.storage.local.set({ currentSuggestions: currentSuggestions }, function() {
-                        // Notify any open popup windows to refresh their data
-                      try {
-                          // Store the updated suggestion with a timestamp to ensure freshness
-                          currentSuggestions[suggestionIdx].lastUpdated = Date.now();
-                          
-                          // Try to update any open popup
-                          const popupName = `edit_field_${suggestionIdx}`;
-                          const existingPopup = window.open('', popupName);
-                          
-                          if (existingPopup && !existingPopup.closed) {
-                            // Try to send a message to update the popup content
-                            existingPopup.postMessage({
-                              action: 'updateSuggestionData',
-                              suggestion: currentSuggestions[suggestionIdx]
-                            }, '*');
-                          }
-                        } catch (e) {
-                          console.error("Error communicating with popup:", e);
-                        }
-                      });
-                      
-                      // Optionally, update the field's placeholder or title with new examples
-                      if (actualItem) {
-                        actualItem.setAttribute('title', 'Examples: ' + data.new_examples.join(', '));
-                      }
-                        // Show both the new range and examples in a notification
-                      const alertMessage = data.range ? 
-                        `Updated!\nDescription: ${data.range}\nNew examples:\n${data.new_examples.join('\n')}` :
-                        `Updated!\nNew examples:\n${data.new_examples.join('\n')}`;
-                      
-                      // Create a non-intrusive notification instead of an alert
-                      try {
-                        const notification = document.createElement('div');
-                        notification.style.cssText = `
-                          position: fixed;
-                          top: 20px;
-                          right: 20px;
-                          background: #28a745;
-                          color: white;
-                          padding: 15px 20px;
-                          border-radius: 5px;
-                          z-index: 999999;
-                          box-shadow: 0 3px 10px rgba(0,0,0,0.2);
-                          max-width: 300px;
-                          font-family: Arial, sans-serif;
-                          animation: fadeIn 0.3s ease-out;
-                        `;
-                        
-                        notification.innerHTML = `
-                          <div style="font-weight:bold;margin-bottom:5px;">Suggestion Updated</div>
-                          <div style="font-size:12px;">${data.new_examples.length} examples received from server</div>
-                          <div style="margin-top:10px;font-size:12px;text-align:center;">
-                            <span style="cursor:pointer;text-decoration:underline;">View details</span>
-                          </div>
-                        `;
-                        
-                        // Add click event to show full details
-                        notification.querySelector('span').onclick = function() {
-                          alert(alertMessage);
-                        };
-                        
-                        // Add to document
-                        document.body.appendChild(notification);
-                        
-                        // Remove after 5 seconds
-                        setTimeout(() => {
-                          if (notification.parentNode) {
-                            notification.parentNode.removeChild(notification);
-                          }
-                        }, 5000);
-                      } catch (e) {
-                        // Fallback to regular alert if there's any error
-                        alert(alertMessage);
-                      }
-                    } else {
-                      alert('Updated and sent to backend!');
-                    }
-                  }).catch(() => {
-                    const submitFailTime = Date.now();
-                    const submitDuration = submitFailTime - submitStartTime;
-                    
-                    // Record submit failure event
-                    record({
-                      type: 'suggestion_modal_submit_failure',
-                      time: submitFailTime,
-                      url: window.location.href,
-                      tag: 'BUTTON',
-                      id: 'edit-submit',
-                      class: 'modal-button',
-                      value: null,
-                      x: null,
-                      y: null,
-                      xpath: null,
-                      field_name: itemInfo.name || '',
-                      field_type: itemInfo.type || '',
-                      suggestion_index: suggestionIdx,
-                      submit_duration_ms: submitDuration
-                    });
-                    
-                    // Change button color to red when submission fails
-                    if (buttonElement) {
-                      buttonElement.style.setProperty('background-color', '#ff4444', 'important');
-                      buttonElement.style.setProperty('color', 'white', 'important');
-                      // Store state for hover effect
-                      buttonElement.setAttribute('data-state', 'failed');
-                    }
-                    alert('Failed to send to backend.');
-                  });
-                  break;
-              }
-            }
-          });
-        }
-      });
-    }
   }
-
 })();

@@ -41,6 +41,31 @@ function sendMessageToParent(action, data = {}) {
   }, '*');
 }
 
+// Update the UI with suggestion data from storage
+function updateUIWithSuggestion(suggestion) {
+  console.log('Updating UI with suggestion:', suggestion);
+  
+  // Display field name
+  document.getElementById('field-name').textContent = suggestion.name || suggestion.id || '(Unnamed Field)';
+  
+  // Only update if user hasn't edited these fields
+  if (!userHasEditedRange) {
+    const rangeTextarea = document.getElementById('edit-range');
+    rangeTextarea.value = suggestion.range || '';
+    console.log('Updated range field with:', suggestion.range);
+  }
+  
+  if (!userHasEditedExamples) {
+    const examplesTextarea = document.getElementById('edit-examples');
+    if (suggestion.examples && Array.isArray(suggestion.examples)) {
+      examplesTextarea.value = suggestion.examples.join('\n');
+      console.log('Updated examples field with:', suggestion.examples);
+    } else {
+      examplesTextarea.value = '';
+    }
+  }
+}
+
 // Function to fetch the latest data from storage
 function fetchLatestData() {
   const params = getQueryParams();
@@ -48,6 +73,8 @@ function fetchLatestData() {
   
   // Only proceed if we have a valid index
   if (isNaN(idx)) return;
+  
+  console.log('Fetching latest data for index:', idx);
   
   // Connect to chrome extension API
   if (chrome && chrome.runtime && chrome.runtime.id) {
@@ -58,28 +85,51 @@ function fetchLatestData() {
       id: params.id || '',
       name: params.name || ''
     }, function(response) {
+      console.log('Response from getSuggestion:', response);
+      
+      if (chrome.runtime.lastError) {
+        console.error('Chrome runtime error:', chrome.runtime.lastError);
+        updateUIFromParams(); // Fallback to URL params
+        return;
+      }
+      
       if (response && response.suggestion) {
+        console.log('Updating UI with fresh suggestion data:', response.suggestion);
         updateUIWithSuggestion(response.suggestion);
+        
+        // Add a visual indicator that data was refreshed
+        const indicator = document.createElement('div');
+        indicator.style.cssText = `
+          position: fixed;
+          bottom: 10px;
+          right: 10px;
+          background: #007bff;
+          color: white;
+          padding: 5px 10px;
+          border-radius: 3px;
+          font-size: 12px;
+          z-index: 999999;
+        `;
+        indicator.textContent = 'Data refreshed';
+        document.body.appendChild(indicator);
+        
+        setTimeout(() => {
+          if (indicator.parentNode) {
+            indicator.parentNode.removeChild(indicator);
+          }
+        }, 2000);
+      } else if (response && response.error) {
+        console.error('Error getting suggestion:', response.error);
+        updateUIFromParams(); // Fallback to URL params
+      } else {
+        console.log('No suggestion data received, using URL params');
+        updateUIFromParams(); // Fallback to URL params
       }
     });
   } else {
     // Fallback to URL parameters if we can't access Chrome API
+    console.log('Chrome API not available, using URL params');
     updateUIFromParams();
-  }
-}
-
-// Update the UI with suggestion data from storage
-function updateUIWithSuggestion(suggestion) {
-  // Display field name
-  document.getElementById('field-name').textContent = suggestion.name || suggestion.id || '(Unnamed Field)';
-  
-  // Only update values if user hasn't edited them
-  if (!userHasEditedRange && suggestion.range) {
-    document.getElementById('edit-range').value = suggestion.range;
-  }
-  
-  if (!userHasEditedExamples && suggestion.examples && Array.isArray(suggestion.examples)) {
-    document.getElementById('edit-examples').value = suggestion.examples.join('\n');
   }
 }
 
@@ -194,6 +244,7 @@ document.addEventListener('DOMContentLoaded', function() {
     window.close();
   });
   
+  // Modified submit button handler
   document.getElementById('edit-submit').addEventListener('click', function() {
     // Get values
     const range = document.getElementById('edit-range').value;
@@ -201,13 +252,112 @@ document.addEventListener('DOMContentLoaded', function() {
       .split('\n')
       .map(s => s.trim())
       .filter(Boolean);
+
+    console.log('Submitting changes:', { range, examples });
+
+    // Show a loading indicator immediately
+    const submitBtn = document.getElementById('edit-submit');
+    submitBtn.disabled = true;
+    submitBtn.textContent = 'Submitting...';
     
+    // Send the submit message
     sendMessageToParent('submitEdit', {
       range: range,
       examples: examples
     });
+
+    // Set up a timeout in case we don't get a response
+    const timeout = setTimeout(() => {
+      console.log('Submit timeout, closing window');
+      submitBtn.disabled = false;
+      submitBtn.textContent = 'Submit';
+      window.close();
+    }, 5000);
+
+    // Listen for completion message from parent
+    function submitCompleteHandler(event) {
+      if (event.data && (event.data.action === 'submitComplete' || event.data.action === 'serverUpdateComplete')) {
+        console.log('Submit complete received:', event.data);
+        
+        if (event.data.action === 'submitComplete') {
+          clearTimeout(timeout);
+          
+          // Re-enable button
+          submitBtn.disabled = false;
+          submitBtn.textContent = 'Submit';
+        }
+        
+        // Update the UI with the new data immediately
+        if (event.data.suggestion) {
+          console.log('Updating UI with submitted data:', event.data.suggestion);
+          
+          // Force update the UI even if user has edited (since this is the final server response)
+          if (event.data.action === 'serverUpdateComplete') {
+            userHasEditedRange = false;
+            userHasEditedExamples = false;
+          }
+          
+          updateUIWithSuggestion(event.data.suggestion);
+          
+          // Show success message only for initial submit complete
+          if (event.data.action === 'submitComplete') {
+            const successMsg = document.createElement('div');
+            successMsg.style.cssText = `
+              position: fixed;
+              top: 10px;
+              left: 10px;
+              right: 10px;
+              background: #28a745;
+              color: white;
+              padding: 10px;
+              border-radius: 4px;
+              text-align: center;
+              font-weight: bold;
+              z-index: 999999;
+            `;
+            successMsg.textContent = 'Changes saved successfully!';
+            document.body.appendChild(successMsg);
+            
+            setTimeout(() => {
+              if (successMsg.parentNode) {
+                successMsg.parentNode.removeChild(successMsg);
+              }
+            }, 2000);
+            
+            // Close window after showing success
+            setTimeout(() => window.close(), 2500);
+          } else if (event.data.action === 'serverUpdateComplete') {
+            // Show a subtle indicator for server update
+            const updateMsg = document.createElement('div');
+            updateMsg.style.cssText = `
+              position: fixed;
+              bottom: 10px;
+              right: 10px;
+              background: #007bff;
+              color: white;
+              padding: 5px 10px;
+              border-radius: 3px;
+              font-size: 12px;
+              z-index: 999999;
+            `;
+            updateMsg.textContent = 'Server updated';
+            document.body.appendChild(updateMsg);
+            
+            setTimeout(() => {
+              if (updateMsg.parentNode) {
+                updateMsg.parentNode.removeChild(updateMsg);
+              }
+            }, 1500);
+          }
+        }
+        
+        // Remove this listener for submitComplete only
+        if (event.data.action === 'submitComplete') {
+          window.removeEventListener('message', submitCompleteHandler);
+        }
+      }
+    }
     
-    // Don't close immediately to prevent race conditions
-    setTimeout(() => window.close(), 100);
+    window.addEventListener('message', submitCompleteHandler);
   });
 });

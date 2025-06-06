@@ -11,8 +11,12 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       const currentSuggestions = result.currentSuggestions || [];
       const idx = request.idx;
       
+      console.log('getSuggestion request:', { idx, totalSuggestions: currentSuggestions.length });
+      
       if (idx >= 0 && idx < currentSuggestions.length) {
         const suggestion = currentSuggestions[idx];
+        
+        console.log('Found suggestion:', suggestion);
         
         // Verify this is the same field (prevent confusion if the indexes change)
         if ((request.id && suggestion.id === request.id) ||
@@ -20,9 +24,11 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
             (!request.id && !request.name)) { // Fallback if no identifiers
           sendResponse({ suggestion: suggestion });
         } else {
+          console.log('Field mismatch:', { requestId: request.id, requestName: request.name, suggestionId: suggestion.id, suggestionName: suggestion.name });
           sendResponse({ error: 'Field mismatch' });
         }
       } else {
+        console.log('Invalid suggestion index:', { idx, length: currentSuggestions.length });
         sendResponse({ error: 'Invalid suggestion index' });
       }
     });

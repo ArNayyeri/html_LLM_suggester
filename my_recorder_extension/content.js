@@ -428,132 +428,156 @@
   }  // Move the message listener setup outside the showEditModal function to ensure it's always available
   if (!window.hasSetupMessageListener) {
     window.hasSetupMessageListener = true;
-
-    window.addEventListener('message', function (event) {
+    
+    window.addEventListener('message', function(event) {
       // Process messages from popup windows
       if (event.data && event.data.action) {
         const eventData = event.data;
         const itemInfo = eventData.itemInfo;
-
+        
         if (!itemInfo) return;
-
+        
         // Find the relevant suggestion
-        let suggestion = null;
         let suggestionIdx = itemInfo.idx;
-        let actualItem = null;
-
+        
         // Get the button element to change its color
         const buttonElement = document.querySelector(`.input-suggestion-btn[data-idx="${suggestionIdx}"]`);
-
+        
         if (!buttonElement) {
           console.error('Button element not found for index:', suggestionIdx);
           return;
         }
-
+        
         // Handle different actions
         switch (eventData.action) {
           case 'cancelEdit':
             console.log('Processing cancel edit for button:', suggestionIdx);
-
-            // Record cancel event
-            record({
-              type: 'suggestion_modal_cancel',
-              time: eventData.time,
-              url: window.location.href,
-              tag: 'BUTTON',
-              id: 'edit-cancel',
-              class: 'modal-button',
-              value: null,
-              x: null,
-              y: null,
-              xpath: null,
-              field_name: itemInfo.name || '',
-              field_type: itemInfo.type || '',
-              suggestion_index: suggestionIdx
-            });
-
+            
             // Force button color to red when cancelled
             buttonElement.setAttribute('data-state', 'cancelled');
             buttonElement.style.setProperty('background', 'linear-gradient(135deg, #dc3545 0%, #bd2130 100%)', 'important');
             buttonElement.style.setProperty('border-color', '#ffffff', 'important');
             buttonElement.style.setProperty('box-shadow', '0 2px 8px rgba(0, 0, 0, 0.3), 0 0 0 1px rgba(220, 53, 69, 0.5)', 'important');
-
-            // Also update using the updateState function if available
-            if (buttonElement.updateState) {
-              buttonElement.updateState('cancelled');
-            }
+            
+            console.log('Button color changed to red for cancel');
             break;
-
+            
           case 'confirmEdit':
             console.log('Processing confirm edit for button:', suggestionIdx);
-
-            // Record confirm event
-            record({
-              type: 'suggestion_modal_confirm',
-              time: eventData.time,
-              url: window.location.href,
-              tag: 'BUTTON',
-              id: 'edit-confirm',
-              class: 'modal-button',
-              value: null,
-              x: null,
-              y: null,
-              xpath: null,
-              field_name: itemInfo.name || '',
-              field_type: itemInfo.type || '',
-              suggestion_index: suggestionIdx
-            });
-
+            
             // Force button color to green when confirmed
             buttonElement.setAttribute('data-state', 'confirmed');
             buttonElement.style.setProperty('background', 'linear-gradient(135deg, #28a745 0%, #1e7e34 100%)', 'important');
             buttonElement.style.setProperty('border-color', '#ffffff', 'important');
             buttonElement.style.setProperty('box-shadow', '0 2px 8px rgba(0, 0, 0, 0.3), 0 0 0 1px rgba(40, 167, 69, 0.5)', 'important');
-
-            // Also update using the updateState function if available
-            if (buttonElement.updateState) {
-              buttonElement.updateState('confirmed');
-            }
-
-            // Send confirmation to Python backend (existing code)
-            chrome.storage.local.get({ currentSuggestions: [] }, function (result) {
+            
+            console.log('Button color changed to green for confirm');
+            break;
+            
+          case 'submitEdit':
+            console.log('Processing submit edit for button:', suggestionIdx);
+            
+            // Get the values from the message
+            const newRange = eventData.data.range;
+            const newExamples = eventData.data.examples;
+            
+            console.log('Submit data received:', { newRange, newExamples });
+            
+            // FIRST: Update the local storage immediately with new values
+            chrome.storage.local.get({ currentSuggestions: [] }, function(result) {
               const currentSuggestions = result.currentSuggestions || [];
+              
               if (suggestionIdx < currentSuggestions.length) {
-                suggestion = currentSuggestions[suggestionIdx];
-
-                const confirmData = {
-                  field: itemInfo.name || itemInfo.id,
-                  time: eventData.time,
-                  url: window.location.href,
-                  suggestion_index: suggestionIdx,
-                  suggestion: suggestion
-                };
-
-                fetch('http://localhost:5000/confirm_suggestion', {
-                  method: 'POST',
-                  headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify(confirmData)
-                })
+                // Update the suggestion in memory with new values
+                currentSuggestions[suggestionIdx].range = newRange;
+                currentSuggestions[suggestionIdx].examples = newExamples;
+                
+                console.log('Updating local storage with:', { range: newRange, examples: newExamples });
+                
+                // Save updated suggestions to storage immediately
+                chrome.storage.local.set({ currentSuggestions: currentSuggestions }, function() {
+                  console.log('Updated suggestion stored locally:', currentSuggestions[suggestionIdx]);
+                  
+                  // Send completion message to popup IMMEDIATELY
+                  if (event.source && !event.source.closed) {
+                    console.log('Sending submitComplete message to popup');
+                    event.source.postMessage({
+                      action: 'submitComplete',
+                      success: true,
+                      suggestion: currentSuggestions[suggestionIdx]
+                    }, '*');
+                  }
+                  
+                  // Change button color to green immediately
+                  buttonElement.setAttribute('data-state', 'submitted');
+                  buttonElement.style.setProperty('background', 'linear-gradient(135deg, #28a745 0%, #1e7e34 100%)', 'important');
+                  buttonElement.style.setProperty('border-color', '#ffffff', 'important');
+                  buttonElement.style.setProperty('box-shadow', '0 2px 8px rgba(0, 0, 0, 0.3), 0 0 0 1px rgba(40, 167, 69, 0.5)', 'important');
+                  
+                  console.log('Button color changed to green for submit');
+                  
+                  // THEN: Send to backend and UPDATE LOCAL STORAGE WITH SERVER RESPONSE
+                  fetch('http://localhost:5000/update_input_suggestion', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                      field: itemInfo.name || itemInfo.id,
+                      range: newRange,
+                      examples: newExamples
+                    })
+                  })
                   .then(res => res.json())
                   .then(data => {
-                    console.log('Confirmation successfully sent to backend:', data);
-
+                    console.log('Backend update successful:', data);
+                    
+                    // UPDATE LOCAL STORAGE WITH SERVER RESPONSE
+                    chrome.storage.local.get({ currentSuggestions: [] }, function(storageResult) {
+                      const updatedSuggestions = storageResult.currentSuggestions || [];
+                      
+                      if (suggestionIdx < updatedSuggestions.length) {
+                        // Update with server response values
+                        if (data.range !== undefined) {
+                          updatedSuggestions[suggestionIdx].range = data.range;
+                          console.log('Updated range from server:', data.range);
+                        }
+                        if (data.new_examples !== undefined) {
+                          updatedSuggestions[suggestionIdx].examples = data.new_examples;
+                          console.log('Updated examples from server:', data.new_examples);
+                        }
+                        
+                        // Save the server-updated data to storage
+                        chrome.storage.local.set({ currentSuggestions: updatedSuggestions }, function() {
+                          console.log('Server response stored in local storage:', updatedSuggestions[suggestionIdx]);
+                          
+                          // Send another completion message with updated data
+                          if (event.source && !event.source.closed) {
+                            console.log('Sending server update to popup');
+                            event.source.postMessage({
+                              action: 'serverUpdateComplete',
+                              success: true,
+                              suggestion: updatedSuggestions[suggestionIdx]
+                            }, '*');
+                          }
+                        });
+                      }
+                    });
+                    
                     // Show success notification
                     const notification = document.createElement('div');
                     notification.style.cssText = `
-                  position: fixed;
-                  bottom: 20px;
-                  right: 20px;
-                  background-color: #28a745;
-                  color: white;
-                  padding: 10px 15px;
-                  border-radius: 4px;
-                  z-index: 999999;
-                  box-shadow: 0 2px 5px rgba(0,0,0,0.2);
-                `;
-                    notification.innerHTML = '<strong>Confirmation saved!</strong>';
+                      position: fixed;
+                      top: 20px;
+                      right: 20px;
+                      background: #28a745;
+                      color: white;
+                      padding: 15px 20px;
+                      border-radius: 5px;
+                      z-index: 999999;
+                      box-shadow: 0 3px 10px rgba(0,0,0,0.2);
+                    `;
+                    notification.innerHTML = '<strong>Suggestion updated successfully!</strong>';
                     document.body.appendChild(notification);
-
+                    
                     setTimeout(() => {
                       if (notification.parentNode) {
                         notification.parentNode.removeChild(notification);
@@ -561,99 +585,14 @@
                     }, 3000);
                   })
                   .catch(error => {
-                    console.error('Failed to send confirmation to backend:', error);
+                    console.error('Backend update failed:', error);
+                    // Don't change button color back - keep the local changes
                   });
+                });
+              } else {
+                console.error('Invalid suggestion index:', suggestionIdx);
               }
             });
-            break;
-
-          case 'submitEdit':
-            console.log('Processing submit edit for button:', suggestionIdx);
-
-            // Record submit start event
-            record({
-              type: 'suggestion_modal_submit_start',
-              time: eventData.time,
-              url: window.location.href,
-              tag: 'BUTTON',
-              id: 'edit-submit',
-              class: 'modal-button',
-              value: null,
-              x: null,
-              y: null,
-              xpath: null,
-              field_name: itemInfo.name || '',
-              field_type: itemInfo.type || '',
-              suggestion_index: suggestionIdx
-            });
-
-            // Get the values from the message
-            const newRange = eventData.data.range;
-            const newExamples = eventData.data.examples;
-
-            // Send to backend
-            fetch('http://localhost:5000/update_input_suggestion', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                field: itemInfo.name || itemInfo.id,
-                range: newRange,
-                examples: newExamples
-              })
-            })
-              .then(res => res.json())
-              .then(data => {
-                console.log('Submit successful for button:', suggestionIdx);
-
-                // Force button color to green when submitted successfully
-                buttonElement.setAttribute('data-state', 'submitted');
-                buttonElement.style.setProperty('background', 'linear-gradient(135deg, #28a745 0%, #1e7e34 100%)', 'important');
-                buttonElement.style.setProperty('border-color', '#ffffff', 'important');
-                buttonElement.style.setProperty('box-shadow', '0 2px 8px rgba(0, 0, 0, 0.3), 0 0 0 1px rgba(40, 167, 69, 0.5)', 'important');
-
-                // Also update using the updateState function if available
-                if (buttonElement.updateState) {
-                  buttonElement.updateState('submitted');
-                }
-
-                // Show success notification
-                const notification = document.createElement('div');
-                notification.style.cssText = `
-              position: fixed;
-              top: 20px;
-              right: 20px;
-              background: #28a745;
-              color: white;
-              padding: 15px 20px;
-              border-radius: 5px;
-              z-index: 999999;
-              box-shadow: 0 3px 10px rgba(0,0,0,0.2);
-            `;
-                notification.innerHTML = '<strong>Suggestion updated successfully!</strong>';
-                document.body.appendChild(notification);
-
-                setTimeout(() => {
-                  if (notification.parentNode) {
-                    notification.parentNode.removeChild(notification);
-                  }
-                }, 3000);
-              })
-              .catch(error => {
-                console.error('Submit failed for button:', suggestionIdx);
-
-                // Force button color to red when submission fails
-                buttonElement.setAttribute('data-state', 'failed');
-                buttonElement.style.setProperty('background', 'linear-gradient(135deg, #dc3545 0%, #bd2130 100%)', 'important');
-                buttonElement.style.setProperty('border-color', '#ffffff', 'important');
-                buttonElement.style.setProperty('box-shadow', '0 2px 8px rgba(0, 0, 0, 0.3), 0 0 0 1px rgba(220, 53, 69, 0.5)', 'important');
-
-                // Also update using the updateState function if available
-                if (buttonElement.updateState) {
-                  buttonElement.updateState('failed');
-                }
-
-                alert('Failed to send to backend.');
-              });
             break;
         }
       }

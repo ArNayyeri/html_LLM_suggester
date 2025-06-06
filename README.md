@@ -36,7 +36,7 @@ You can use **either** of the following methods:
 #### 1. Clone and Run the Python Code
 1. **Clone the repository:**
    ```sh
-   git clone https://github.com/yourusername/html_LLM_suggester.git
+   git clone https://github.com/ArNayyeri/html_LLM_suggester.git
    cd html_LLM_suggester
    ```
 2. **Install Python dependencies:**

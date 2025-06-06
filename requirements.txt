@@ -7,3 +7,4 @@ ollama
 tiktoken
 deep-translator
 beautifulsoup4
+requests

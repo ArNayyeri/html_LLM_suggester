@@ -96,11 +96,15 @@ class FormField(BaseModel):
         ..., description="Validation rules inferred from attributes like minlength, maxlength, pattern, placeholder in English")
     examples: list[str] = Field(...,
                                 description="Five example values that satisfy the limitations")
+    bad_examples: list[str] = Field(...,
+                                    description="Five example values that violate the limitations for negative testing")
 
 
 class ExampleSchema(BaseModel):
     examples: list[str] = Field(...,
                                 description="Five example values that satisfy the range")
+    bad_examples: list[str] = Field(...,
+                                    description="Five example values that violate the range for negative testing")
 
 
 def translate_to_persian(english_text):
@@ -257,6 +261,23 @@ def get_content_after(soup, target_element, max_tokens):
     return ''.join(collected_content)
 
 
+def is_element_visible(element):
+    style = element.get('style', '')
+    if style:
+        style_lower = style.lower()
+        # Check for display:none or visibility:hidden
+        if 'display:none' in style_lower.replace(' ', '') or 'display: none' in style_lower:
+            return False
+        if 'visibility:hidden' in style_lower.replace(' ', '') or 'visibility: hidden' in style_lower:
+            return False
+
+    # Check for hidden attribute
+    if element.get('hidden') is not None:
+        return False
+
+    return True
+
+
 def suggest_input_values(html):
     soup = BeautifulSoup(html, 'html.parser')
 
@@ -277,11 +298,13 @@ def suggest_input_values(html):
         'url',
         'week'
     ]
-    # Filter out elements with invalid types
+    # Filter out elements with invalid types and invisible elements
     elements = [
-        el for el in elements if el.name == 'textarea' or
-        (el.name ==
-         'input' and 'type' in el.attrs and el['type'] in valid_types)
+        el for el in elements if (
+            el.name == 'textarea' or
+            (el.name ==
+             'input' and 'type' in el.attrs and el['type'] in valid_types)
+        ) and is_element_visible(el)
     ]
 
     # Extract IDs and names (only if they exist)
@@ -310,108 +333,55 @@ def suggest_input_values(html):
             "role": "system",
             "content": (
                 "You are an HTML parser. You receive HTML below and process only the element whose id or name equals the specified value. "
-                "For that element, create a JSON object with keys: name, id, type, limitations, and examples. "
+                "For that element, create a JSON object with keys: name, id, type, limitations, examples, and bad_examples. "
                 "- name: The value of the 'name' attribute.\n"
                 "- id: The value of the 'id' attribute (use the name if id doesn't exist).\n"
                 "- type: Input type (text, password, etc.) or 'textarea'.\n"
-                "- limitations: Validation rules extracted from attributes like minlength, maxlength, pattern, or placeholder. This description should be written in English as complete sentences. Instead of using short phrases like 'minimum 8 English characters', provide a complete explanation. For example: 'The password must be at least 8 characters long. English lowercase or uppercase letters are allowed. Numbers and other common characters can also be used to increase security.'\n"
-                "- examples: 5 example values that match these limitations. Examples should be appropriate for the field context (English or Persian based on the field purpose).\n"
+                "- limitations: Validation rules extracted from attributes like minlength, maxlength, pattern, or placeholder. This description should be written in English as complete sentences.\n"
+                "- examples: 5 example values that match these limitations and would be ACCEPTED by the field validation.\n"
+                "- bad_examples: 5 example values that VIOLATE these limitations and would be REJECTED by the field validation (for negative testing).\n"
                 "Keep the keys constant but write limitation values in English.\n"
                 "Provide output only as a JSON object matching the Pydantic schema.\n"
                 f"Process only and exclusively the element with {'id' if identifier_type == 'id' else 'name'} equal to '{identifier_value}'. Do not include any other element in the output.\n"
-                "Here are 5 complete examples for understanding:\n\n"
+                "Here are examples for understanding:\n\n"
 
                 "Example 1:\n"
                 "Input:\n"
-                "<form>\n"
-                "  <label for=\"input-0\">Username:</label>\n"
-                "  <input id=\"input-0\" name=\"username\" type=\"text\" placeholder=\"e.g. ali123\" />\n"
-                "  <label for=\"input-1\">Email:</label>\n"
-                "  <input id=\"input-1\" name=\"email\" type=\"email\" />\n"
-                "  <label for=\"input-2\">Password:</label>\n"
-                "  <input id=\"input-2\" name=\"password\" type=\"password\" minlength=\"8\" />\n"
-                "</form>\n"
-                "Output (for input-2):\n"
+                "<input id=\"password\" name=\"password\" type=\"password\" minlength=\"8\" />\n"
+                "Output:\n"
                 "{\n"
                 "  \"name\": \"password\",\n"
-                "  \"id\": \"input-2\",\n"
+                "  \"id\": \"password\",\n"
                 "  \"type\": \"password\",\n"
-                "  \"examples\": [\"12345678\", \"password123\", \"adminadmin\", \"abcDEFghiJ\", \"userpass2024\"],\n"
+                "  \"examples\": [\"password123\", \"MySecure2024\", \"TestPass99\", \"AdminLogin1\", \"UserAccess88\"],\n"
+                "  \"bad_examples\": [\"123\", \"pass\", \"1234567\", \"a\", \"\"],\n"
                 "  \"limitations\": \"The password must be at least 8 characters long. English lowercase or uppercase letters are allowed. Numbers and other common characters can also be used to increase security.\"\n"
                 "}\n\n"
 
                 "Example 2:\n"
                 "Input:\n"
-                "<form>\n"
-                "  <label for=\"input-3\">Phone Number:</label>\n"
-                "  <input id=\"input-3\" name=\"phone\" type=\"text\" pattern=\"\\d{11}\" />\n"
-                "  <label for=\"input-4\">Security Code:</label>\n"
-                "  <input id=\"input-4\" name=\"security_code\" type=\"text\" maxlength=\"6\" />\n"
-                "</form>\n"
-                "Output (for input-3):\n"
+                "<input id=\"email\" name=\"email\" type=\"email\" />\n"
+                "Output:\n"
                 "{\n"
-                "  \"name\": \"phone\",\n"
-                "  \"id\": \"input-3\",\n"
-                "  \"type\": \"text\",\n"
-                "  \"examples\": [\"09123456789\", \"09351234567\", \"09221234567\", \"09901234567\", \"09111111111\"],\n"
-                "  \"limitations\": \"The phone number must contain exactly 11 numeric digits with no spaces, symbols, or letters allowed. It typically starts with 09 and follows the format of Iranian mobile phone numbers.\"\n"
+                "  \"name\": \"email\",\n"
+                "  \"id\": \"email\",\n"
+                "  \"type\": \"email\",\n"
+                "  \"examples\": [\"user@example.com\", \"test.email@domain.org\", \"admin@company.co.uk\", \"developer@site.net\", \"contact@business.info\"],\n"
+                "  \"bad_examples\": [\"invalid-email\", \"@domain.com\", \"user@\", \"plaintext\", \"user.domain.com\"],\n"
+                "  \"limitations\": \"Must be a valid email address with @ symbol and proper domain format.\"\n"
                 "}\n\n"
 
                 "Example 3:\n"
                 "Input:\n"
-                "<form>\n"
-                "  <label for=\"input-5\">Preferred Language:</label>\n"
-                "  <input id=\"input-5\" name=\"language\" type=\"text\" placeholder=\"fa\" />\n"
-                "  <label for=\"input-6\">Last Name:</label>\n"
-                "  <input id=\"input-6\" name=\"lastname\" type=\"text\" />\n"
-                "</form>\n"
-                "Output (for input-5):\n"
+                "<input id=\"phone\" name=\"phone\" type=\"text\" pattern=\"\\d{11}\" />\n"
+                "Output:\n"
                 "{\n"
-                "  \"name\": \"language\",\n"
-                "  \"id\": \"input-5\",\n"
+                "  \"name\": \"phone\",\n"
+                "  \"id\": \"phone\",\n"
                 "  \"type\": \"text\",\n"
-                "  \"examples\": [\"fa\", \"en\", \"de\", \"fr\", \"ar\"],\n"
-                "  \"limitations\": \"This field should contain the abbreviation code of a language such as 'fa' for Persian or 'en' for English. Only lowercase English letters are allowed and the language code is typically entered in two-letter format.\"\n"
-                "}\n\n"
-
-                "Example 4:\n"
-                "Input:\n"
-                "<form>\n"
-                "  <label for=\"input-7\">Description:</label>\n"
-                "  <textarea id=\"input-7\" name=\"description\" minlength=\"10\" maxlength=\"100\"></textarea>\n"
-                "  <label for=\"input-8\">Location:</label>\n"
-                "  <input id=\"input-8\" name=\"location\" type=\"text\" />\n"
-                "</form>\n"
-                "Output (for input-7):\n"
-                "{\n"
-                "  \"name\": \"description\",\n"
-                "  \"id\": \"input-7\",\n"
-                "  \"type\": \"textarea\",\n"
-                "  \"examples\": [\n"
-                "    \"This is a test text.\",\n"
-                "    \"User describes their experience.\",\n"
-                "    \"Please enter more information.\",\n"
-                "    \"Test message for form validation.\",\n"
-                "    \"Description about website features.\"\n"
-                "  ],\n"
-                "  \"limitations\": \"The entered description must be at least 10 and at most 100 characters long. Users can write free text, but should avoid writing very short or very long text. The text should be meaningful and contain letters, words, and possibly punctuation marks.\"\n"
-                "}\n\n"
-
-                "Example 5:\n"
-                "Input:\n"
-                "<form>\n"
-                "  <label for=\"input-9\">National ID:</label>\n"
-                "  <input id=\"input-9\" name=\"national_id\" type=\"text\" pattern=\"\\d{10}\" />\n"
-                "  <label for=\"input-10\">Address:</label>\n"
-                "  <input id=\"input-10\" name=\"address\" type=\"text\" />\n"
-                "</form>\n"
-                "Output (for input-9):\n"
-                "{\n"
-                "  \"name\": \"national_id\",\n"
-                "  \"id\": \"input-9\",\n"
-                "  \"type\": \"text\",\n"
-                "  \"examples\": [\"0012345678\", \"1234567890\", \"9876543210\", \"1122334455\", \"2233445566\"],\n"
-                "  \"limitations\": \"The national ID must be exactly 10 numeric digits. Letters or non-numeric characters are not allowed. This is a unique numeric identifier assigned to each person and must be entered correctly.\"\n"
+                "  \"examples\": [\"09123456789\", \"09351234567\", \"09221234567\", \"09901234567\", \"09111111111\"],\n"
+                "  \"bad_examples\": [\"0912345678\", \"091234567890\", \"abc1234567\", \"09-123-456\", \"123456789\"],\n"
+                "  \"limitations\": \"The phone number must contain exactly 11 numeric digits with no spaces, symbols, or letters allowed.\"\n"
                 "}\n"
             )
         }
@@ -1191,12 +1161,14 @@ def update_input_suggestion():
     field = data.get('field')
     range_ = data.get('range')
     examples_ = data.get('examples')
+    bad_examples_ = data.get('bad_examples', [])
     update_path = os.path.join(
         RUN_SAVE_DIR, f'input_suggestion_updates_{run_time_temp}_{field}.json')
 
     # --- Load previous update for this field, if any ---
     previous_range = None
     previous_examples = None
+    previous_bad_examples = None
     try:
         # Find all previous update files for this field in RUN_SAVE_DIR
         files = [f for f in os.listdir(RUN_SAVE_DIR) if f.startswith(
@@ -1208,17 +1180,19 @@ def update_input_suggestion():
                 prev = json.load(f)
                 previous_range = prev.get('range')
                 previous_examples = prev.get('examples')
+                previous_bad_examples = prev.get('bad_examples', [])
     except Exception as e:
         print(f"Could not load previous update for field {field}: {e}")
 
     # --- If range is empty but examples exist, generate range first ---
-    if not range_ and examples_:
+    if not range_ and (examples_ or bad_examples_):
         try:
             range_generation_prompt = (
                 "You are a data analysis expert. Based on the examples below, identify their patterns and limitations "
                 "and write a precise and concise description in English about these limitations. "
                 "Write only a short phrase in one or two sentences, no more. Example: 'minimum 8 English characters with at least one number and one uppercase letter' or 'valid email' or '10-digit national ID'"
-                f"\n\nExamples: {json.dumps(examples_, ensure_ascii=False)}"
+                f"\n\nGood Examples: {json.dumps(examples_, ensure_ascii=False)}"
+                f"\n\nBad Examples: {json.dumps(bad_examples_, ensure_ascii=False)}"
                 "\n\nPlease write only a short phrase in English that explains the limitations of this data, without any additional explanation."
             )
 
@@ -1233,6 +1207,7 @@ def update_input_suggestion():
             range_ = translate_to_persian(english_range)
             print(f"Generated range based on examples: {range_}")
             new_examples = examples_
+            new_bad_examples = bad_examples_
         except Exception as e:
             print(f"Error generating range from examples: {e}")
             range_ = "محدودیت نامشخص"
@@ -1247,14 +1222,16 @@ def update_input_suggestion():
             f"You are an intelligent tester. Your job is to generate test data for form fields on websites. "
             f"Here you are given a new limitation (range) for a field:\n"
             f"{english_range}\n"
-            "Examples should be similar to values that real users would enter in the form, not just random or artificial data."
+            "Examples should be similar to values that real users would enter in the form, not just random or artificial data.\n"
+            "Bad examples should be invalid inputs that would trigger validation errors and be rejected by the form."
         )
-        if examples_:
+        if examples_ or bad_examples_:
             prompt += (
-                f"\nExamples that users have actually entered (as samples): {json.dumps(examples_, ensure_ascii=False)}\n"
+                f"\nGood examples that users have entered: {json.dumps(examples_, ensure_ascii=False)}\n"
+                f"Bad examples provided: {json.dumps(bad_examples_, ensure_ascii=False)}\n"
                 "New examples should be similar in style and realism to these examples."
             )
-        if previous_range and previous_examples:
+        if previous_range and (previous_examples or previous_bad_examples):
             # Translate previous range to English if needed
             prev_english_range = previous_range
             if any('\u0600' <= c <= '\u06FF' for c in previous_range):
@@ -1263,44 +1240,41 @@ def update_input_suggestion():
             prompt += (
                 "\nSee the previous limitation and examples and generate new examples that are compatible with the new limitation and are not repetitive.\n"
                 f"Previous limitation: {prev_english_range}\n"
-                f"Previous examples: {json.dumps(previous_examples, ensure_ascii=False)}\n"
+                f"Previous good examples: {json.dumps(previous_examples, ensure_ascii=False)}\n"
+                f"Previous bad examples: {json.dumps(previous_bad_examples, ensure_ascii=False)}\n"
             )
         prompt += (
-            "Please generate 5 appropriate and valid input values that match this limitation. "
-            "Each value should be a realistic and practical string that can be used in a real form. "
-            "Output should only be in the form of a JSON array:\n"
-            "[\"example1\", \"example2\", \"example3\", \"example4\", \"example5\"]\n\n"
+            "Please generate 5 appropriate GOOD examples and 5 appropriate BAD examples that match this limitation. "
+            "Good examples should be valid inputs that would be ACCEPTED by the form validation. "
+            "Bad examples should be invalid inputs that would be REJECTED by the form validation and trigger errors. "
+            "Output should be in JSON format:\n"
+            "{\n"
+            "  \"examples\": [\"good1\", \"good2\", \"good3\", \"good4\", \"good5\"],\n"
+            "  \"bad_examples\": [\"bad1\", \"bad2\", \"bad3\", \"bad4\", \"bad5\"]\n"
+            "}\n\n"
+
             "Examples:\n\n"
 
             "Range: minimum 8 English characters\n"
-            "Output:\n[\"password\", \"openai123\", \"machinelearning\", \"SecurePass1\", \"AIengineer\"]\n\n"
+            "Output:\n"
+            "{\n"
+            "  \"examples\": [\"password\", \"openai123\", \"machinelearning\", \"SecurePass1\", \"AIengineer\"],\n"
+            "  \"bad_examples\": [\"pass\", \"123\", \"short\", \"a\", \"1234567\"]\n"
+            "}\n\n"
+
+            "Range: valid email address\n"
+            "Output:\n"
+            "{\n"
+            "  \"examples\": [\"test@example.com\", \"user123@gmail.com\", \"admin@company.org\", \"info@site.ir\", \"dev@domain.net\"],\n"
+            "  \"bad_examples\": [\"invalid-email\", \"@domain.com\", \"user@\", \"plaintext\", \"email.domain.com\"]\n"
+            "}\n\n"
 
             "Range: exactly 11 numeric digits\n"
-            "Output:\n[\"09123456789\", \"09987654321\", \"09335557766\", \"09221234567\", \"09001112233\"]\n\n"
-
-            "Range: between 5 to 15 characters\n"
-            "Output:\n[\"hello\", \"chatbot2024\", \"1234567890\", \"formTesting\", \"userinput\"]\n\n"
-
-            "Range: 10-digit national ID\n"
-            "Output:\n[\"1234567890\", \"0011223344\", \"9876543210\", \"1122334455\", \"5566778899\"]\n\n"
-
-            "Range: only lowercase English letters\n"
-            "Output:\n[\"hello\", \"username\", \"password\", \"openai\", \"testcase\"]\n\n"
-
-            "Range: only Persian letters with minimum 3 characters\n"
-            "Output:\n[\"سلام\", \"کاربر\", \"تست\", \"برنامه\", \"مثال\"]\n\n"
-
-            "Range: date with yyyy-mm-dd format\n"
-            "Output:\n[\"2023-01-01\", \"2024-12-31\", \"1999-07-15\", \"2025-05-21\", \"2000-10-10\"]\n\n"
-
-            "Range: valid email\n"
-            "Output:\n[\"test@example.com\", \"user123@gmail.com\", \"name.lastname@yahoo.com\", \"info@site.ir\", \"developer@domain.dev\"]\n\n"
-
-            "Range: numbers only between 1 to 100\n"
-            "Output:\n[\"5\", \"42\", \"100\", \"1\", \"73\"]\n\n"
-
-            "Range: Iranian car license plate format\n"
-            "Output:\n[\"12ب34567\", \"45د12345\", \"98س87654\", \"11الف22222\", \"21ج67890\"]"
+            "Output:\n"
+            "{\n"
+            "  \"examples\": [\"09123456789\", \"09987654321\", \"09335557766\", \"09221234567\", \"09001112233\"],\n"
+            "  \"bad_examples\": [\"0912345678\", \"091234567890\", \"abc1234567\", \"09-123-456\", \"123456789\"]\n"
+            "}\n"
         )
         try:
             response = client.beta.chat.completions.parse(
@@ -1311,22 +1285,39 @@ def update_input_suggestion():
             raw = response.choices[0].message.content
             data = json.loads(raw)
             new_examples = data['examples']
+            new_bad_examples = data['bad_examples']
+
             if examples_:
-                new_examples.extend(examples_)        # check for duplicates
+                new_examples.extend(examples_)
+            if bad_examples_:
+                new_bad_examples.extend(bad_examples_)
+
+            # Remove duplicates
             new_examples = list(set(new_examples))
+            new_bad_examples = list(set(new_bad_examples))
         except Exception as e:
             return (
                 json.dumps({'error': str(e)}),
                 500,
                 {'Content-Type': 'application/json'}
             )
-    updates = {'field': field, 'range': range_,
-               'examples': new_examples}
+
+    updates = {
+        'field': field,
+        'range': range_,
+        'examples': new_examples,
+        'bad_examples': new_bad_examples
+    }
     with open(update_path, 'w', encoding='utf-8') as f:
         json.dump(updates, f, ensure_ascii=False, indent=2)
     return (
         json.dumps(
-            {'status': 'ok', 'new_examples': new_examples, 'range': range_},
+            {
+                'status': 'ok',
+                'new_examples': new_examples,
+                'new_bad_examples': new_bad_examples,
+                'range': range_
+            },
             ensure_ascii=False, indent=2
         ),
         200,

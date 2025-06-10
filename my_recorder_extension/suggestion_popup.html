@@ -11,7 +11,7 @@
       background-color: #f8f9fa;
     }
     .container {
-      max-width: 500px;
+      max-width: 600px;
       margin: 0 auto;
       background-color: white;
       border-radius: 8px;
@@ -34,17 +34,19 @@
       margin: 12px 0 6px;
       font-weight: bold;
     }
-    textarea {
+    input, textarea {
       width: 100%;
-      height: 80px;
       margin-bottom: 8px;
-      resize: vertical;
       padding: 8px;
       border: 1px solid #ccc;
       border-radius: 4px;
       font-family: Arial, sans-serif;
       font-size: 13px;
       box-sizing: border-box;
+    }
+    textarea {
+      height: 80px;
+      resize: vertical;
     }
     .description-textarea {
       direction: rtl;
@@ -53,6 +55,15 @@
     .examples-textarea {
       direction: ltr;
       text-align: left;
+    }
+    .bad-examples-textarea {
+      direction: ltr;
+      text-align: left;
+      border: 1px solid #dc3545;
+      background-color: #fff5f5;
+    }
+    .bad-examples-label {
+      color: #dc3545;
     }
     .button-row {
       display: flex;
@@ -85,7 +96,8 @@
       border: 1px solid #28a745;
       background: #28a745;
       color: white;
-    }    .confirm-btn:hover {
+    }
+    .confirm-btn:hover {
       background: #218838;
     }
     .confirm-btn:disabled {
@@ -112,6 +124,13 @@
     .submit-btn:hover {
       background: #0069d9;
     }
+    .examples-section {
+      margin-bottom: 15px;
+    }
+    .section-divider {
+      border-top: 1px solid #eee;
+      margin: 20px 0;
+    }
   </style>
 </head>
 <body>
@@ -124,9 +143,16 @@
       <textarea id="edit-range" class="description-textarea"></textarea>
     </div>
     
-    <div>
-      <label for="edit-examples">Examples (one per line):</label>
-      <textarea id="edit-examples" class="examples-textarea"></textarea>
+    <div class="examples-section">
+      <label for="edit-examples">Good Examples (one per line):</label>
+      <textarea id="edit-examples" class="examples-textarea" placeholder="Valid inputs that should be accepted..."></textarea>
+    </div>
+    
+    <div class="section-divider"></div>
+    
+    <div class="examples-section">
+      <label for="edit-bad-examples" class="bad-examples-label">Bad Examples (one per line):</label>
+      <textarea id="edit-bad-examples" class="bad-examples-textarea" placeholder="Invalid inputs that should be rejected..."></textarea>
     </div>
     
     <div class="button-row">

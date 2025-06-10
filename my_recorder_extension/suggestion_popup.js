@@ -4,6 +4,7 @@
 // Track if user has made changes to prevent overwriting
 let userHasEditedRange = false;
 let userHasEditedExamples = false;
+let userHasEditedBadExamples = false;
 
 // Get query parameters from URL
 function getQueryParams() {
@@ -62,6 +63,16 @@ function updateUIWithSuggestion(suggestion) {
       console.log('Updated examples field with:', suggestion.examples);
     } else {
       examplesTextarea.value = '';
+    }
+  }
+  
+  if (!userHasEditedBadExamples) {
+    const badExamplesTextarea = document.getElementById('edit-bad-examples');
+    if (suggestion.bad_examples && Array.isArray(suggestion.bad_examples)) {
+      badExamplesTextarea.value = suggestion.bad_examples.join('\n');
+      console.log('Updated bad examples field with:', suggestion.bad_examples);
+    } else {
+      badExamplesTextarea.value = '';
     }
   }
 }
@@ -163,6 +174,20 @@ function updateUIFromParams() {
       }
     }
   }
+  
+  if (!userHasEditedBadExamples && params.bad_examples) {
+    try {
+      const badExamples = JSON.parse(decodeURIComponent(params.bad_examples));
+      document.getElementById('edit-bad-examples').value = badExamples.join('\n');
+    } catch (e) {
+      console.error('Failed to parse bad examples:', e);
+      try {
+        document.getElementById('edit-bad-examples').value = decodeURIComponent(params.bad_examples);
+      } catch {
+        document.getElementById('edit-bad-examples').value = params.bad_examples;
+      }
+    }
+  }
 }
 
 // Listen for messages from the parent window (for real-time updates)
@@ -220,6 +245,7 @@ document.addEventListener('DOMContentLoaded', function() {
   // Set up change tracking for text areas
   const rangeTextarea = document.getElementById('edit-range');
   const examplesTextarea = document.getElementById('edit-examples');
+  const badExamplesTextarea = document.getElementById('edit-bad-examples');
   
   rangeTextarea.addEventListener('input', function() {
     userHasEditedRange = true;
@@ -227,6 +253,10 @@ document.addEventListener('DOMContentLoaded', function() {
   
   examplesTextarea.addEventListener('input', function() {
     userHasEditedExamples = true;
+  });
+  
+  badExamplesTextarea.addEventListener('input', function() {
+    userHasEditedBadExamples = true;
   });
   
   // Set up a refresh interval to periodically check for updates
@@ -252,8 +282,12 @@ document.addEventListener('DOMContentLoaded', function() {
       .split('\n')
       .map(s => s.trim())
       .filter(Boolean);
+    const badExamples = document.getElementById('edit-bad-examples').value
+      .split('\n')
+      .map(s => s.trim())
+      .filter(Boolean);
 
-    console.log('Submitting changes:', { range, examples });
+    console.log('Submitting changes:', { range, examples, badExamples });
 
     // Show a loading indicator immediately
     const submitBtn = document.getElementById('edit-submit');
@@ -263,7 +297,8 @@ document.addEventListener('DOMContentLoaded', function() {
     // Send the submit message
     sendMessageToParent('submitEdit', {
       range: range,
-      examples: examples
+      examples: examples,
+      bad_examples: badExamples
     });
 
     // Set up a timeout in case we don't get a response
@@ -295,6 +330,7 @@ document.addEventListener('DOMContentLoaded', function() {
           if (event.data.action === 'serverUpdateComplete') {
             userHasEditedRange = false;
             userHasEditedExamples = false;
+            userHasEditedBadExamples = false;
           }
           
           updateUIWithSuggestion(event.data.suggestion);

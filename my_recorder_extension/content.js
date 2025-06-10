@@ -480,8 +480,9 @@
             // Get the values from the message
             const newRange = eventData.data.range;
             const newExamples = eventData.data.examples;
+            const newBadExamples = eventData.data.bad_examples || [];
             
-            console.log('Submit data received:', { newRange, newExamples });
+            console.log('Submit data received:', { newRange, newExamples, newBadExamples });
             
             // FIRST: Update the local storage immediately with new values
             chrome.storage.local.get({ currentSuggestions: [] }, function(result) {
@@ -491,8 +492,9 @@
                 // Update the suggestion in memory with new values
                 currentSuggestions[suggestionIdx].range = newRange;
                 currentSuggestions[suggestionIdx].examples = newExamples;
+                currentSuggestions[suggestionIdx].bad_examples = newBadExamples;
                 
-                console.log('Updating local storage with:', { range: newRange, examples: newExamples });
+                console.log('Updating local storage with:', { range: newRange, examples: newExamples, bad_examples: newBadExamples });
                 
                 // Save updated suggestions to storage immediately
                 chrome.storage.local.set({ currentSuggestions: currentSuggestions }, function() {
@@ -523,7 +525,8 @@
                     body: JSON.stringify({
                       field: itemInfo.name || itemInfo.id,
                       range: newRange,
-                      examples: newExamples
+                      examples: newExamples,
+                      bad_examples: newBadExamples
                     })
                   })
                   .then(res => res.json())
@@ -543,6 +546,10 @@
                         if (data.new_examples !== undefined) {
                           updatedSuggestions[suggestionIdx].examples = data.new_examples;
                           console.log('Updated examples from server:', data.new_examples);
+                        }
+                        if (data.new_bad_examples !== undefined) {
+                          updatedSuggestions[suggestionIdx].bad_examples = data.new_bad_examples;
+                          console.log('Updated bad examples from server:', data.new_bad_examples);
                         }
                         
                         // Save the server-updated data to storage
@@ -575,7 +582,7 @@
                       z-index: 999999;
                       box-shadow: 0 3px 10px rgba(0,0,0,0.2);
                     `;
-                    notification.innerHTML = '<strong>Suggestion updated successfully!</strong>';
+                    notification.innerHTML = '<strong>Suggestion updated successfully!</strong><br>Good and bad examples saved.';
                     document.body.appendChild(notification);
                     
                     setTimeout(() => {
@@ -656,11 +663,15 @@
         params.append('examples', JSON.stringify(currentItem.examples));
       }
 
+      if (currentItem.bad_examples && currentItem.bad_examples.length > 0) {
+        params.append('bad_examples', JSON.stringify(currentItem.bad_examples));
+      }
+
       const popupURL = `${extensionURL}?${params.toString()}`;
 
       // Open popup window
-      const popupWidth = 550;
-      const popupHeight = 450;
+      const popupWidth = 650;  // Increased width for bad examples
+      const popupHeight = 550; // Increased height for bad examples
       const left = (window.screen.width / 2) - (popupWidth / 2);
       const top = (window.screen.height / 2) - (popupHeight / 2);
 

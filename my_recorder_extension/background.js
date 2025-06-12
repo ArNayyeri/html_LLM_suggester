@@ -3,6 +3,59 @@
 // Store suggestion responses to handle popup closing
 let suggestionResponses = new Map();
 
+// Define verification commands
+const verificationCommands = [
+  'verifyText',
+  'verifyTitle', 
+  'verifyValue',
+  'assertText',
+  'assertTitle', 
+  'assertValue',
+  'storeText',
+  'storeTitle',
+  'storeValue',
+  'waitForElementPresent',
+  'waitForElementNotPresent',
+  'waitForTextPresent',
+  'waitForTextNotPresent',
+  'waitForValue',
+  'waitForNotValue',
+  'waitForVisible',
+  'waitForNotVisible'
+];
+
+// Create context menus when extension loads
+chrome.runtime.onInstalled.addListener(() => {
+  // Create parent menu
+  chrome.contextMenus.create({
+    id: "recordCommands",
+    title: "Record Command",
+    contexts: ["all"]
+  });
+
+  // Create submenu for each verification command
+  verificationCommands.forEach(command => {
+    chrome.contextMenus.create({
+      id: command,
+      parentId: "recordCommands",
+      title: command,
+      contexts: ["all"]
+    });
+  });
+});
+
+// Handle context menu clicks
+chrome.contextMenus.onClicked.addListener((info, tab) => {
+  if (verificationCommands.includes(info.menuItemId)) {
+    // Send message to content script to record the command
+    chrome.tabs.sendMessage(tab.id, {
+      type: 'recordVerificationCommand',
+      command: info.menuItemId,
+      pageUrl: tab.url
+    });
+  }
+});
+
 // Handle messages from popup and content scripts
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   if (request.type === 'getSuggestion') {

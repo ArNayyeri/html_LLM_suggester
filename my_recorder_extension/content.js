@@ -2,6 +2,9 @@
   if (window.hasRecorder) return;
   window.hasRecorder = true;
 
+  // Store the currently right-clicked element
+  let rightClickedElement = null;
+
   function isRecording(callback) {
     chrome.storage.local.get({ isRecording: false }, function (result) {
       callback(result.isRecording);
@@ -137,25 +140,62 @@
   }
 
   function getXPath(element) {
+    if (!element) return '';
+    
+    // If element has a unique ID, use it for a shorter XPath
     if (element.id) {
-      return '//*[@id="' + element.id + '"]';
+      return `//*[@id="${element.id}"]`;
     }
+    
+    // For body element
     if (element === document.body) {
       return '/html/body';
     }
-    var ix = 0;
-    var siblings = element.parentNode ? element.parentNode.childNodes : [];
-    for (var i = 0; i < siblings.length; i++) {
-      var sibling = siblings[i];
-      if (sibling === element) {
-        var tagName = element.tagName ? element.tagName.toLowerCase() : '';
-        return getXPath(element.parentNode) + '/' + tagName + '[' + (ix + 1) + ']';
+    
+    // Build XPath by traversing up the DOM tree
+    let xpath = '';
+    let current = element;
+    
+    while (current && current.nodeType === 1) { // ELEMENT_NODE
+      let tagName = current.tagName.toLowerCase();
+      
+      if (current === document.documentElement) {
+        xpath = '/html' + xpath;
+        break;
       }
-      if (sibling.nodeType === 1 && sibling.tagName === element.tagName) {
-        ix++;
+      
+      // Count preceding siblings with the same tag name
+      let index = 1;
+      let sibling = current.previousElementSibling;
+      while (sibling) {
+        if (sibling.tagName.toLowerCase() === tagName) {
+          index++;
+        }
+        sibling = sibling.previousElementSibling;
       }
+      
+      // Count following siblings to see if index is needed
+      let hasFollowingSibling = false;
+      sibling = current.nextElementSibling;
+      while (sibling) {
+        if (sibling.tagName.toLowerCase() === tagName) {
+          hasFollowingSibling = true;
+          break;
+        }
+        sibling = sibling.nextElementSibling;
+      }
+      
+      // Add index only if there are multiple elements with same tag name
+      if (index > 1 || hasFollowingSibling) {
+        xpath = `/${tagName}[${index}]` + xpath;
+      } else {
+        xpath = `/${tagName}` + xpath;
+      }
+      
+      current = current.parentElement;
     }
-    return '';
+    
+    return xpath;
   }
 
   // Record navigation
@@ -690,4 +730,170 @@
       }
     });
   }
+
+  // Track right-clicked element
+  document.addEventListener('contextmenu', function(e) {
+    rightClickedElement = e.target;
+  }, true);
+
+  // Function to get element text content
+  function getElementText(element) {
+    if (!element) return '';
+    
+    // For input elements, get the value
+    if (element.tagName === 'INPUT' || element.tagName === 'TEXTAREA') {
+      return element.value || '';
+    }
+    
+    // For other elements, get text content
+    return element.textContent.trim() || element.innerText.trim() || '';
+  }
+
+  // Function to get target selector for an element
+  function getTargetSelector(element) {
+    if (!element) return '';
+    
+    // For verification commands, ALWAYS use XPath
+    return `xpath=${getXPath(element)}`;
+  }
+
+  // Function to determine appropriate value based on command and element
+  function getValueForCommand(command, element) {
+    const text = getElementText(element);
+    
+    switch (command) {
+      case 'verifyTitle':
+      case 'assertTitle':
+      case 'storeTitle':
+        return document.title;
+        
+      case 'verifyText':
+      case 'assertText':
+      case 'storeText':
+      case 'waitForTextPresent':
+      case 'waitForTextNotPresent':
+        return text;
+        
+      case 'verifyValue':
+      case 'assertValue':
+      case 'storeValue':
+      case 'waitForValue':
+      case 'waitForNotValue':
+        // For input elements, return the value
+        if (element.tagName === 'INPUT' || element.tagName === 'TEXTAREA') {
+          return element.value || '';
+        }
+        // For other elements, return text content
+        return text;
+        
+      case 'waitForElementPresent':
+      case 'waitForElementNotPresent':
+      case 'waitForVisible':
+      case 'waitForNotVisible':
+        return ''; // These commands don't need a value
+        
+      default:
+        return text;
+    }
+  }
+
+  // Function to record verification command
+  function recordVerificationCommand(command, element) {
+    if (!element) {
+      console.warn('No element selected for verification command');
+      return;
+    }
+
+    // Always use XPath for verification commands
+    const target = `xpath=${getXPath(element)}`;
+    const value = getValueForCommand(command, element);
+    const currentTime = Date.now();
+
+    // Create the recorded event
+    const details = {
+      type: 'verification_command',
+      command: command,
+      target: target,  // This will always be an XPath
+      value: value,
+      time: currentTime,
+      url: window.location.href,
+      element_tag: element.tagName,
+      element_id: element.id || '',
+      element_class: element.className || '',
+      xpath: getXPath(element)
+    };
+
+    console.log('Recording verification command:', details);
+
+    // Record the event
+    record(details);
+    
+    // Send snapshot
+    sendSnapshotToPython('verification_command', details);
+
+    // Show visual feedback
+    showCommandRecordedFeedback(command, target, value);
+  }
+
+  // Function to show visual feedback when command is recorded
+  function showCommandRecordedFeedback(command, target, value) {
+    const feedback = document.createElement('div');
+    feedback.style.cssText = `
+      position: fixed;
+      top: 20px;
+      right: 20px;
+      background: #4CAF50;
+      color: white;
+      padding: 12px 16px;
+      border-radius: 6px;
+      z-index: 999999;
+      font-family: Arial, sans-serif;
+      font-size: 14px;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+      max-width: 400px;
+      word-wrap: break-word;
+    `;
+    
+    // Truncate XPath if too long for display
+    const displayTarget = target.length > 50 ? target.substring(0, 47) + '...' : target;
+    
+    feedback.innerHTML = `
+      <strong>Command Recorded:</strong><br>
+      <code style="background: rgba(255,255,255,0.2); padding: 2px 4px; border-radius: 3px;">${command}</code><br>
+      <small><strong>XPath:</strong> ${displayTarget}</small><br>
+      ${value ? `<small><strong>Value:</strong> ${value}</small>` : ''}
+    `;
+    
+    document.body.appendChild(feedback);
+    
+    // Remove feedback after 4 seconds (longer since XPath might be complex)
+    setTimeout(() => {
+      if (feedback.parentNode) {
+        feedback.parentNode.removeChild(feedback);
+      }
+    }, 4000);
+  }
+
+  // Listen for messages from background script
+  chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+    // ...existing message handling...
+
+    if (request && request.type === 'recordVerificationCommand') {
+      const command = request.command;
+      
+      if (rightClickedElement) {
+        recordVerificationCommand(command, rightClickedElement);
+        sendResponse({ success: true, command: command });
+      } else {
+        console.warn('No right-clicked element found');
+        sendResponse({ success: false, error: 'No element selected' });
+      }
+      return true;
+    }
+
+    // ...rest of existing message handling...
+    return true;
+  });
+
+  // ...rest of existing code...
 })();

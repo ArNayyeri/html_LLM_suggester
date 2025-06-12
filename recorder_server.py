@@ -934,7 +934,7 @@ def events():
 
 def convert_to_katalon_format(events):
     """Convert recorded events to Katalon Recorder HTML table format"""
-
+    
     # Filter out extension-specific events
     extension_events = [
         'suggest_inputs_start',
@@ -1041,7 +1041,22 @@ def convert_to_katalon_format(events):
 
         # Convert event types to Katalon commands
         command_added = False
-        if event_type == 'click':
+        
+        # Handle verification commands - they already have the target as XPath
+        if event_type == 'verification_command':
+            command = event.get('command', '')
+            # Use the target directly from the event (it's already formatted as xpath=...)
+            verification_target = event.get('target', '')
+            verification_value = event.get('value', '')
+            
+            katalon_commands.append({
+                'command': command,
+                'target': verification_target,  # This is already xpath=...
+                'value': verification_value
+            })
+            command_added = True
+            
+        elif event_type == 'click':
             katalon_commands.append({
                 'command': 'click',
                 'target': target,

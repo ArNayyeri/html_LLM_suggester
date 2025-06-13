@@ -24,23 +24,64 @@ const verificationCommands = [
   'waitForNotVisible'
 ];
 
-// Create context menus when extension loads
-chrome.runtime.onInstalled.addListener(() => {
-  // Create parent menu
-  chrome.contextMenus.create({
-    id: "recordCommands",
-    title: "Record Command",
-    contexts: ["all"]
-  });
-
-  // Create submenu for each verification command
-  verificationCommands.forEach(command => {
+// Function to create context menus
+function createContextMenus() {
+  // Remove all existing menus first
+  chrome.contextMenus.removeAll(() => {
+    // Create parent menu
     chrome.contextMenus.create({
-      id: command,
-      parentId: "recordCommands",
-      title: command,
+      id: "recordCommands",
+      title: "Record Command",
       contexts: ["all"]
     });
+
+    // Create submenu for each verification command
+    verificationCommands.forEach(command => {
+      chrome.contextMenus.create({
+        id: command,
+        parentId: "recordCommands",
+        title: command,
+        contexts: ["all"]
+      });
+    });
+  });
+}
+
+// Function to remove context menus
+function removeContextMenus() {
+  chrome.contextMenus.removeAll();
+}
+
+// Listen for recording state changes
+chrome.storage.onChanged.addListener((changes, namespace) => {
+  if (namespace === 'local' && changes.isRecording) {
+    const isRecording = changes.isRecording.newValue;
+    
+    if (isRecording) {
+      // Create context menus when recording starts
+      createContextMenus();
+    } else {
+      // Remove context menus when recording stops
+      removeContextMenus();
+    }
+  }
+});
+
+// Check initial recording state on extension startup
+chrome.runtime.onStartup.addListener(() => {
+  chrome.storage.local.get({ isRecording: false }, function(result) {
+    if (result.isRecording) {
+      createContextMenus();
+    }
+  });
+});
+
+// Also check on extension install/enable
+chrome.runtime.onInstalled.addListener(() => {
+  chrome.storage.local.get({ isRecording: false }, function(result) {
+    if (result.isRecording) {
+      createContextMenus();
+    }
   });
 });
 

@@ -5,7 +5,7 @@ A smart web form analyzer and input suggester using LLMs (Large Language Models)
 ## Overview
 This project provides a Flask-based backend server and a browser extension to:
 - Record HTML/CSS snapshots and user events from web pages.
-- Analyze web forms using LLMs (Ollama or OpenRouter).
+- Analyze web forms using LLMs (Ollama or OpenRouter/Cerebras).
 - Suggest valid input values and ranges for form fields, in Persian, based on the HTML structure.
 - Generate Katalon Studio test scripts from recorded user interactions.
 - Create comprehensive test case combinations from confirmed field data.
@@ -38,7 +38,7 @@ This project provides a Flask-based backend server and a browser extension to:
 
 ### Prerequisites
 - Python 3.8+
-- [Ollama](https://ollama.com/) (for local LLM) or an OpenRouter API key
+- [Ollama](https://ollama.com/) (for local LLM) or an OpenRouter/Cerebras  API key
 - Node.js (for browser extension development, optional)
 
 ### Installation
@@ -66,13 +66,13 @@ You can use **either** of the following methods:
    - `csv`, `math`, `itertools` — Data processing (built-in)
    - `socket`, `urllib.parse` — Network utilities (built-in)
 
-3. **(Optional) Set up Ollama or get an OpenRouter API key.**
+3. **(Optional) Set up Ollama or get an OpenRouter/Cerebras API key.**
 
 4. **Run the server:**
    ```sh
    python recorder_server.py
    ```
-   You will be prompted to choose between local (Ollama) or API (OpenRouter).
+   You will be prompted to choose between local (Ollama) or API (OpenRouter/Cerebras).
 
 #### 2. Use the Latest Release
 - Download the latest pre-built release from the [Releases page](https://github.com/ArNayyeri/html_LLM_suggester/releases) of this repository.
@@ -87,7 +87,7 @@ You can use **either** of the following methods:
 1. **Start the Server:**
    ```bash
    python recorder_server.py
-   # Choose 'local' for Ollama or 'api' for OpenRouter
+   # Choose 'local' for Ollama or 'api' for OpenRouter/Cerebras
    ```
 
 2. **Record User Actions:**
@@ -143,7 +143,7 @@ After the `/events` endpoint processes user events, an interactive GUI automatic
 2. **AI Assistant Tab:**
    - Interactive chat interface with LLM
    - Contextual understanding of your test with maintained chat history
-   - Supports both local (Ollama) and API (OpenRouter) services
+   - Supports both local (Ollama) and API (OpenRouter/Cerebras) services
    - Real-time conversation for test improvement
 
 #### Available Actions:
@@ -260,6 +260,7 @@ Example of a generated Katalon test script from recorded events:
 ## Acknowledgements
 - [Ollama](https://ollama.com/)
 - [OpenRouter](https://openrouter.ai/)
+- [Cerebras](https://www.cerebras.ai/)
 - [OpenAI Python SDK](https://github.com/openai/openai-python)
 - [Deep Translator](https://github.com/nidhaloff/deep-translator)
 - [Beautiful Soup](https://www.crummy.com/software/BeautifulSoup/)

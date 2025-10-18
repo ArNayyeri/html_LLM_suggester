@@ -49,6 +49,7 @@ def count_tokens(text):
 
 ollama_url = 'http://localhost:11434/v1'
 openrouter_url = 'https://openrouter.ai/api/v1'
+cerebras_url = "https://api.cerebras.ai/v1"
 
 site = input(
     "Do you want to use local or api? (local/api): "
@@ -61,9 +62,14 @@ if site == 'local':
     is_local = True
 
 elif site == 'api':
-    token = input("Enter your OpenRouter API token: ").strip()
-    url = openrouter_url
-    model_name = 'meta-llama/llama-3.3-8b-instruct:free'
+    model = input("Cerebras/OpenRouter: ").strip()
+    token = input("Enter your API token: ").strip()
+    if model.lower() == 'openrouter':
+        url = openrouter_url
+        model_name = 'mistralai/mistral-small-3.2-24b-instruct:free'
+    else:
+        url = cerebras_url
+        model_name="llama-3.3-70b"
     is_local = False
 
 else:
@@ -321,10 +327,11 @@ def suggest_input_values(html):
             target_element = soup.find(id=identifier_value)
         else:  # name
             target_element = soup.find(attrs={'name': identifier_value})
-        # If the web is more than 128k tokens,
+        # If the web is more than 100k tokens,
         # it will be considered as an input within 100k tokens from where the desired input ID is.
-        if count_tokens(html) > 128 * 1024:
-            target_html = truncate_with_context(soup, target_element)
+        if count_tokens(html) > 100000:
+            target_html = truncate_with_context(
+                soup, target_element,max_tokens=100000)
         else:
             target_html = html
         # Build the prompt for structured extraction
@@ -934,7 +941,7 @@ def events():
 
 def convert_to_katalon_format(events):
     """Convert recorded events to Katalon Recorder HTML table format"""
-    
+
     # Filter out extension-specific events
     extension_events = [
         'suggest_inputs_start',
@@ -1041,21 +1048,21 @@ def convert_to_katalon_format(events):
 
         # Convert event types to Katalon commands
         command_added = False
-        
+
         # Handle verification commands - they already have the target as XPath
         if event_type == 'verification_command':
             command = event.get('command', '')
             # Use the target directly from the event (it's already formatted as xpath=...)
             verification_target = event.get('target', '')
             verification_value = event.get('value', '')
-            
+
             katalon_commands.append({
                 'command': command,
                 'target': verification_target,  # This is already xpath=...
                 'value': verification_value
             })
             command_added = True
-            
+
         elif event_type == 'click':
             katalon_commands.append({
                 'command': 'click',

@@ -66,7 +66,7 @@ elif site == 'api':
     token = input("Enter your API token: ").strip()
     if model.lower() == 'openrouter':
         url = openrouter_url
-        model_name = 'mistralai/mistral-small-3.2-24b-instruct:free'
+        model_name = 'meta-llama/llama-3.3-8b-instruct:free'
     else:
         url = cerebras_url
         model_name="llama-3.3-70b"
@@ -327,11 +327,11 @@ def suggest_input_values(html):
             target_element = soup.find(id=identifier_value)
         else:  # name
             target_element = soup.find(attrs={'name': identifier_value})
-        # If the web is more than 100k tokens,
-        # it will be considered as an input within 100k tokens from where the desired input ID is.
-        if count_tokens(html) > 100000:
+        # If the web is more than 60K tokens,
+        # it will be considered as an input within 60K tokens from where the desired input ID is.
+        if count_tokens(html) > 60000:
             target_html = truncate_with_context(
-                soup, target_element,max_tokens=100000)
+                soup, target_element,max_tokens=60000)
         else:
             target_html = html
         # Build the prompt for structured extraction

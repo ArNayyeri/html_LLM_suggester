@@ -32,7 +32,7 @@ from tkinter import ttk, scrolledtext, messagebox
 # Default endpoints and models
 OLLAMA_LOCAL_URL = 'http://localhost:11434/v1'
 OPENROUTER_URL = 'https://openrouter.ai/api/v1'
-GPU_URL = "http://185.239.2.48:11434/v1"
+GPU_URL = "http://185.239.2.48:3000/v1"
 
 DEFAULT_GPU_MODEL = "gemma4:e4b"
 DEFAULT_LOCAL_MODEL = "Llama3.2:3b"
@@ -92,7 +92,7 @@ elif mode == 'openrouter':
     model_name = model_name or DEFAULT_OPENROUTER_MODEL
 else:  # GPU mode
     base_url = GPU_URL
-    token = api_token or 'ollama'
+    token = api_token or input("Enter your GPU API token: ").strip()
     model_name = model_name or DEFAULT_GPU_MODEL
 
 print(f"\n[*] Configured LLM: {model_name} via {base_url}")

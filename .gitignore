@@ -5,3 +5,4 @@ tokens
 setup.py
 /build
 /page_examples
+__pycache__

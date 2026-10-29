@@ -1,13 +1,14 @@
+// content.js - Antigravity Web Recorder Content Script
 (function () {
   if (window.hasRecorder) return;
   window.hasRecorder = true;
 
-  // Store the currently right-clicked element
   let rightClickedElement = null;
+  let lastRecordedValues = new Map(); // Track input values
 
   function isRecording(callback) {
     chrome.storage.local.get({ isRecording: false }, function (result) {
-      callback(result.isRecording);
+      callback(!!result.isRecording);
     });
   }
 
@@ -15,885 +16,454 @@
     isRecording(function (recording) {
       if (!recording) return;
       chrome.storage.local.get({ recordedEvents: [] }, function (result) {
-        const events = result.recordedEvents;
+        const events = result.recordedEvents || [];
         events.push(details);
         chrome.storage.local.set({ recordedEvents: events });
       });
     });
   }
 
-  // Store all snapshots in memory for this tab
-  window._snapshots = [];
-  let lastSnapshot = { html: '', css: '' };
-
-  function getCurrentHTML() {
-    let html = document.documentElement.outerHTML;
-    // Remove script tags to avoid sending them
-    html = html.replace(/<script[^>]*>([\s\S]*?)<\/script>/gi, '');
-    // Remove style tags to avoid sending them
-    html = html.replace(/<style[^>]*>([\s\S]*?)<\/style>/gi, '');
-    return html;
-  }
-
-  function getCurrentCSS() {
-    let css = '';
-    for (let sheet of document.styleSheets) {
-      try {
-        for (let rule of sheet.cssRules) {
-          css += rule.cssText + '\n';
-        }
-      } catch (e) {
-        // Ignore cross-origin stylesheets
-      }
-    }
-    return css;
-  }
-
-  // Add debug log before sending snapshot
-  function sendSnapshotToPython(eventType, eventObj) {
-    isRecording(function (recording) {
-      if (!recording) return;
-      const html = getCurrentHTML();
-      const css = getCurrentCSS();
-      if (html !== lastSnapshot.html || css !== lastSnapshot.css) {
-        lastSnapshot = { html, css };
-        if (eventObj) {
-          // Use the provided event object
-          var lastEvent = eventObj;
-          // Debug log
-          console.log('Sending snapshot (with current event):', {
-            eventType,
-            time: Date.now(),
-            url: window.location.href,
-            html,
-            css,
-            event: lastEvent
-          });
-          fetch('http://localhost:5000/snapshot', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              eventType: eventType,
-              time: Date.now(),
-              url: window.location.href,
-              html: html,
-              css: css,
-              event: lastEvent
-            })
-          }).catch(error => {
-            console.error('Failed to send snapshot:', error);
-            chrome.storage.local.set({ serverError: true });
-          });
-        } else {
-          // Fallback: get last event from storage (for navigation, etc.)
-          chrome.storage.local.get({ recordedEvents: [] }, function (result) {
-            const events = result.recordedEvents;
-            const lastEvent = events.length > 0 ? events[events.length - 1] : null;
-            console.log('Sending snapshot:', {
-              eventType,
-              time: Date.now(),
-              url: window.location.href,
-              html,
-              css,
-              event: lastEvent
-            });
-            fetch('http://localhost:5000/snapshot', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                eventType: eventType,
-                time: Date.now(),
-                url: window.location.href,
-                html: html,
-                css: css,
-                event: lastEvent
-              })
-            }).catch(error => {
-              console.error('Failed to send snapshot:', error);
-              chrome.storage.local.set({ serverError: true });
-            });
-          });
-        }
-      }
-    });
-  }
-
-  function recordEvent(e) {
-    let xpath = '';
-    if (!e.target.id) {
-      xpath = getXPath(e.target);
-    }
-    const details = {
-      type: e.type,
-      tag: e.target.tagName,
-      id: e.target.id,
-      class: e.target.className,
-      value: e.target.value || null,
-      x: e.clientX || null,
-      y: e.clientY || null,
-      time: Date.now(),
-      url: window.location.href,
-      xpath: xpath || null,
-    };
-    record(details);
-    sendSnapshotToPython(e.type, details);
-  }
-
   function getXPath(element) {
     if (!element) return '';
-    
-    // If element has a unique ID, use it for a shorter XPath
     if (element.id) {
       return `//*[@id="${element.id}"]`;
     }
-    
-    // For body element
     if (element === document.body) {
       return '/html/body';
     }
-    
-    // Build XPath by traversing up the DOM tree
     let xpath = '';
     let current = element;
-    
-    while (current && current.nodeType === 1) { // ELEMENT_NODE
+    while (current && current.nodeType === 1) {
       let tagName = current.tagName.toLowerCase();
-      
       if (current === document.documentElement) {
         xpath = '/html' + xpath;
         break;
       }
-      
-      // Count preceding siblings with the same tag name
       let index = 1;
       let sibling = current.previousElementSibling;
       while (sibling) {
-        if (sibling.tagName.toLowerCase() === tagName) {
-          index++;
-        }
+        if (sibling.tagName.toLowerCase() === tagName) index++;
         sibling = sibling.previousElementSibling;
       }
-      
-      // Count following siblings to see if index is needed
-      let hasFollowingSibling = false;
-      sibling = current.nextElementSibling;
-      while (sibling) {
-        if (sibling.tagName.toLowerCase() === tagName) {
-          hasFollowingSibling = true;
-          break;
-        }
-        sibling = sibling.nextElementSibling;
-      }
-      
-      // Add index only if there are multiple elements with same tag name
-      if (index > 1 || hasFollowingSibling) {
-        xpath = `/${tagName}[${index}]` + xpath;
-      } else {
-        xpath = `/${tagName}` + xpath;
-      }
-      
+      xpath = `/${tagName}[${index}]` + xpath;
       current = current.parentElement;
     }
-    
     return xpath;
   }
 
-  // Record navigation
+  function getElementValue(el) {
+    if (!el) return '';
+    if (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.tagName === 'SELECT') {
+      return el.value || '';
+    }
+    return el.textContent.trim();
+  }
+
+  function recordEvent(e) {
+    isRecording(function (recording) {
+      if (!recording) return;
+      
+      const target = e.target;
+      if (!target || target.closest('.llm-recorder-ui')) return; // Ignore extension UI
+
+      const val = getElementValue(target);
+      const details = {
+        type: e.type,
+        tag: target.tagName,
+        id: target.id || '',
+        name: target.name || '',
+        class: target.className || '',
+        value: val || null,
+        time: Date.now(),
+        url: window.location.href,
+        xpath: target.id ? `//*[@id="${target.id}"]` : getXPath(target)
+      };
+
+      record(details);
+    });
+  }
+
+  // Listen for user interactions
+  document.addEventListener('click', recordEvent, true);
+  
+  // Track input typing
+  document.addEventListener('input', function (e) {
+    if (e.target && (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA')) {
+      lastRecordedValues.set(e.target, e.target.value);
+    }
+  }, true);
+
+  document.addEventListener('change', recordEvent, true);
+
+  // Track form submissions
+  document.addEventListener('submit', function (e) {
+    isRecording(function (recording) {
+      if (!recording) return;
+      const target = e.target;
+      const details = {
+        type: 'submit',
+        tag: target.tagName,
+        id: target.id || '',
+        name: target.name || '',
+        class: target.className || '',
+        time: Date.now(),
+        url: window.location.href,
+        xpath: target.id ? `//*[@id="${target.id}"]` : getXPath(target)
+      };
+      record(details);
+    });
+  }, true);
+
+  // Track right-clicked element for verification commands
+  document.addEventListener('contextmenu', function (e) {
+    rightClickedElement = e.target;
+  }, true);
+
+  // Initial navigation
   function recordNavigation(type) {
     record({
       type: type,
       time: Date.now(),
-      url: window.location.href,
+      url: window.location.href
     });
-    sendSnapshotToPython(type);
   }
 
-  // Only record clicks, change, and submit (not input)
-  ['click', 'change'].forEach(function (eventType) {
-    document.addEventListener(eventType, recordEvent, true);
-  });
+  window.addEventListener('popstate', () => recordNavigation('popstate'));
+  window.addEventListener('hashchange', () => recordNavigation('hashchange'));
 
-  // Record form submissions
-  document.addEventListener('submit', function (e) {
-    let xpath = '';
-    if (!e.target.id) {
-      xpath = getXPath(e.target);
-    }
-    record({
-      type: 'submit',
-      tag: e.target.tagName,
-      id: e.target.id,
-      class: e.target.className,
-      time: Date.now(),
-      url: window.location.href,
-      xpath: xpath || null
-    });
-    sendSnapshotToPython('submit');
-  }, true);
+  // ---------------------------------------------------------------------------
+  // Chrome Extension Messaging
+  // ---------------------------------------------------------------------------
 
-  // Record navigation events (but NOT DOMContentLoaded)
-  window.addEventListener('popstate', function () { recordNavigation('popstate'); });
-  window.addEventListener('hashchange', function () { recordNavigation('hashchange'); });
-
-  // Only record pageload after all resources are loaded
-  window.addEventListener('load', function () {
-    recordNavigation('pageload');
-  });
-
-  // If the script loads after the page is already loaded, trigger manually
-  if (document.readyState === 'complete') {
-    recordNavigation('pageload');
-  }
-
-  // Add message listener for all snapshots
   chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
-    if (request && request.type === 'getAllPageSnapshots') {
-      sendResponse({ snapshots: window._snapshots });
-    }
     if (request && request.type === 'getPageSnapshot') {
-      console.log('Received getPageSnapshot request');
       const html = document.documentElement.outerHTML;
-      let css = '';
-      for (let sheet of document.styleSheets) {
-        try {
-          for (let rule of sheet.cssRules) {
-            css += rule.cssText + '\n';
-          }
-        } catch (e) {
-          // Ignore cross-origin stylesheets
-        }
-      }
       sendResponse({
-        html,
-        css,
+        html: html,
         url: window.location.href,
         title: document.title
       });
+      return true;
     }
+
     if (request && request.type === 'injectInputSuggestions') {
-      injectInputSuggestionButtons(request.suggestions);
+      injectInputSuggestionButtons(request.suggestions || []);
+      sendResponse({ success: true });
+      return true;
     }
-    return true;
-  }); function injectInputSuggestionButtons(suggestions) {
-    // Remove any existing suggestion buttons first
-    document.querySelectorAll('.input-suggestion-btn').forEach(btn => btn.remove());
-
-    suggestions.forEach((item, idx) => {
-      const el = document.getElementById(item.id) || document.querySelector(`[name="${item.name}"]`);
-      if (!el) return;
-
-      const btn = document.createElement('button');
-      btn.textContent = '?';
-      btn.className = 'input-suggestion-btn';
-      btn.setAttribute('data-idx', idx);
-
-      // Enhanced CSS for better visibility
-      btn.style.cssText = `
-      all: initial !important;
-      font-family: Arial, sans-serif !important;
-      font-size: 14px !important;
-      font-weight: bold !important;
-      line-height: 1 !important;
-      
-      /* Size and positioning */
-      width: 24px !important;
-      height: 24px !important;
-      min-width: 24px !important;
-      min-height: 24px !important;
-      max-width: 24px !important;
-      max-height: 24px !important;
-      
-      /* Visual appearance */
-      background: linear-gradient(135deg, #007bff 0%, #0056b3 100%) !important;
-      color: white !important;
-      border: 2px solid #ffffff !important;
-      border-radius: 50% !important;
-      
-      /* Shadow for visibility */
-      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3), 
-                  0 0 0 1px rgba(0, 123, 255, 0.5) !important;
-      
-      /* Positioning */
-      position: absolute !important;
-      z-index: 999999 !important;
-      
-      /* Layout */
-      display: inline-flex !important;
-      align-items: center !important;
-      justify-content: center !important;
-      
-      /* Interaction */
-      cursor: pointer !important;
-      user-select: none !important;
-      
-      /* Reset all possible inherited styles */
-      margin: 0 !important;
-      padding: 0 !important;
-      text-decoration: none !important;
-      text-align: center !important;
-      vertical-align: baseline !important;
-      white-space: nowrap !important;
-      
-      /* Transitions */
-      transition: all 0.2s ease !important;
-      
-      /* Ensure visibility */
-      opacity: 1 !important;
-      visibility: visible !important;
-      overflow: visible !important;
-      transform: none !important;
-      
-      /* Text properties */
-      text-shadow: none !important;
-      text-transform: none !important;
-      letter-spacing: normal !important;
-      word-spacing: normal !important;
-      
-      /* Box model */
-      box-sizing: border-box !important;
-      float: none !important;
-      clear: none !important;
-    `;
-
-      // Position the button relative to the input field
-      const positionButton = () => {
-        const rect = el.getBoundingClientRect();
-        const scrollTop = window.pageYOffset || document.documentElement.scrollTop;
-        const scrollLeft = window.pageXOffset || document.documentElement.scrollLeft;
-
-        // Position to the right of the input field with some margin
-        btn.style.setProperty('top', `${rect.top + scrollTop + (rect.height - 24) / 2}px`, 'important');
-        btn.style.setProperty('left', `${rect.right + scrollLeft + 8}px`, 'important');
-      };
-
-      // Initial positioning
-      positionButton();
-
-      // Reposition on scroll and resize
-      const repositionHandler = () => {
-        if (document.contains(el) && document.contains(btn)) {
-          positionButton();
-        }
-      };
-
-      window.addEventListener('scroll', repositionHandler);
-      window.addEventListener('resize', repositionHandler);
-
-      btn.title = 'Click to edit field suggestions';
-
-      // Enhanced hover effects
-      btn.addEventListener('mouseenter', function () {
-        const state = this.getAttribute('data-state');
-        if (!state) {
-          this.style.setProperty('transform', 'scale(1.1)', 'important');
-          this.style.setProperty('box-shadow', '0 3px 12px rgba(0, 0, 0, 0.4), 0 0 0 2px rgba(0, 123, 255, 0.8)', 'important');
-        }
-      });
-
-      btn.addEventListener('mouseleave', function () {
-        const state = this.getAttribute('data-state');
-        if (state === 'confirmed' || state === 'submitted') {
-          this.style.setProperty('background', 'linear-gradient(135deg, #28a745 0%, #1e7e34 100%)', 'important');
-          this.style.setProperty('transform', 'scale(1)', 'important');
-          this.style.setProperty('box-shadow', '0 2px 8px rgba(0, 0, 0, 0.3), 0 0 0 1px rgba(40, 167, 69, 0.5)', 'important');
-        } else if (state === 'cancelled' || state === 'failed') {
-          this.style.setProperty('background', 'linear-gradient(135deg, #dc3545 0%, #bd2130 100%)', 'important');
-          this.style.setProperty('transform', 'scale(1)', 'important');
-          this.style.setProperty('box-shadow', '0 2px 8px rgba(0, 0, 0, 0.3), 0 0 0 1px rgba(220, 53, 69, 0.5)', 'important');
-        } else {
-          this.style.setProperty('transform', 'scale(1)', 'important');
-          this.style.setProperty('box-shadow', '0 2px 8px rgba(0, 0, 0, 0.3), 0 0 0 1px rgba(0, 123, 255, 0.5)', 'important');
-        }
-      });
-
-      // State-based styling
-      const updateButtonState = (state) => {
-        btn.setAttribute('data-state', state);
-        switch (state) {
-          case 'confirmed':
-          case 'submitted':
-            btn.style.setProperty('background', 'linear-gradient(135deg, #28a745 0%, #1e7e34 100%)', 'important');
-            btn.style.setProperty('border-color', '#ffffff', 'important');
-            btn.style.setProperty('box-shadow', '0 2px 8px rgba(0, 0, 0, 0.3), 0 0 0 1px rgba(40, 167, 69, 0.5)', 'important');
-            break;
-          case 'cancelled':
-          case 'failed':
-            btn.style.setProperty('background', 'linear-gradient(135deg, #dc3545 0%, #bd2130 100%)', 'important');
-            btn.style.setProperty('border-color', '#ffffff', 'important');
-            btn.style.setProperty('box-shadow', '0 2px 8px rgba(0, 0, 0, 0.3), 0 0 0 1px rgba(220, 53, 69, 0.5)', 'important');
-            break;
-          default:
-            btn.style.setProperty('background', 'linear-gradient(135deg, #007bff 0%, #0056b3 100%)', 'important');
-            btn.style.setProperty('border-color', '#ffffff', 'important');
-            btn.style.setProperty('box-shadow', '0 2px 8px rgba(0, 0, 0, 0.3), 0 0 0 1px rgba(0, 123, 255, 0.5)', 'important');
-        }
-      };
-
-      btn.onclick = (e) => {
-        e.stopPropagation();
-        e.preventDefault();
-
-        // Record question mark button click event
-        const questionMarkClickTime = Date.now();
-        record({
-          type: 'suggestion_question_mark_click',
-          time: questionMarkClickTime,
-          url: window.location.href,
-          tag: 'BUTTON',
-          id: `suggestion-btn-${idx}`,
-          class: 'input-suggestion-btn',
-          value: null,
-          x: e.clientX || null,
-          y: e.clientY || null,
-          xpath: null,
-          field_name: item.name || item.id || '',
-          field_type: item.type || '',
-          suggestion_index: idx
-        });
-
-        try {
-          showEditModal(item, idx, suggestions, questionMarkClickTime);
-        } catch (err) {
-          console.error('Failed to open popup:', err);
-          alert('Failed to open popup window. Please check if popup blocking is enabled.');
-        }
-      };
-
-      // Append to body instead of next to the element to avoid layout issues
-      document.body.appendChild(btn);
-
-      // Store reference for state updates
-      btn.updateState = updateButtonState;
-    });
-  }  // Move the message listener setup outside the showEditModal function to ensure it's always available
-  if (!window.hasSetupMessageListener) {
-    window.hasSetupMessageListener = true;
-    
-    window.addEventListener('message', function(event) {
-      // Process messages from popup windows
-      if (event.data && event.data.action) {
-        const eventData = event.data;
-        const itemInfo = eventData.itemInfo;
-        
-        if (!itemInfo) return;
-        
-        // Find the relevant suggestion
-        let suggestionIdx = itemInfo.idx;
-        
-        // Get the button element to change its color
-        const buttonElement = document.querySelector(`.input-suggestion-btn[data-idx="${suggestionIdx}"]`);
-        
-        if (!buttonElement) {
-          console.error('Button element not found for index:', suggestionIdx);
-          return;
-        }
-        
-        // Handle different actions
-        switch (eventData.action) {
-          case 'cancelEdit':
-            console.log('Processing cancel edit for button:', suggestionIdx);
-            
-            // Force button color to red when cancelled
-            buttonElement.setAttribute('data-state', 'cancelled');
-            buttonElement.style.setProperty('background', 'linear-gradient(135deg, #dc3545 0%, #bd2130 100%)', 'important');
-            buttonElement.style.setProperty('border-color', '#ffffff', 'important');
-            buttonElement.style.setProperty('box-shadow', '0 2px 8px rgba(0, 0, 0, 0.3), 0 0 0 1px rgba(220, 53, 69, 0.5)', 'important');
-            
-            console.log('Button color changed to red for cancel');
-            break;
-            
-          case 'confirmEdit':
-            console.log('Processing confirm edit for button:', suggestionIdx);
-            
-            // Force button color to green when confirmed
-            buttonElement.setAttribute('data-state', 'confirmed');
-            buttonElement.style.setProperty('background', 'linear-gradient(135deg, #28a745 0%, #1e7e34 100%)', 'important');
-            buttonElement.style.setProperty('border-color', '#ffffff', 'important');
-            buttonElement.style.setProperty('box-shadow', '0 2px 8px rgba(0, 0, 0, 0.3), 0 0 0 1px rgba(40, 167, 69, 0.5)', 'important');
-            
-            console.log('Button color changed to green for confirm');
-            break;
-            
-          case 'submitEdit':
-            console.log('Processing submit edit for button:', suggestionIdx);
-            
-            // Get the values from the message
-            const newRange = eventData.data.range;
-            const newExamples = eventData.data.examples;
-            const newBadExamples = eventData.data.bad_examples || [];
-            
-            console.log('Submit data received:', { newRange, newExamples, newBadExamples });
-            
-            // FIRST: Update the local storage immediately with new values
-            chrome.storage.local.get({ currentSuggestions: [] }, function(result) {
-              const currentSuggestions = result.currentSuggestions || [];
-              
-              if (suggestionIdx < currentSuggestions.length) {
-                // Update the suggestion in memory with new values
-                currentSuggestions[suggestionIdx].range = newRange;
-                currentSuggestions[suggestionIdx].examples = newExamples;
-                currentSuggestions[suggestionIdx].bad_examples = newBadExamples;
-                
-                console.log('Updating local storage with:', { range: newRange, examples: newExamples, bad_examples: newBadExamples });
-                
-                // Save updated suggestions to storage immediately
-                chrome.storage.local.set({ currentSuggestions: currentSuggestions }, function() {
-                  console.log('Updated suggestion stored locally:', currentSuggestions[suggestionIdx]);
-                  
-                  // Send completion message to popup IMMEDIATELY
-                  if (event.source && !event.source.closed) {
-                    console.log('Sending submitComplete message to popup');
-                    event.source.postMessage({
-                      action: 'submitComplete',
-                      success: true,
-                      suggestion: currentSuggestions[suggestionIdx]
-                    }, '*');
-                  }
-                  
-                  // Change button color to green immediately
-                  buttonElement.setAttribute('data-state', 'submitted');
-                  buttonElement.style.setProperty('background', 'linear-gradient(135deg, #28a745 0%, #1e7e34 100%)', 'important');
-                  buttonElement.style.setProperty('border-color', '#ffffff', 'important');
-                  buttonElement.style.setProperty('box-shadow', '0 2px 8px rgba(0, 0, 0, 0.3), 0 0 0 1px rgba(40, 167, 69, 0.5)', 'important');
-                  
-                  console.log('Button color changed to green for submit');
-                  
-                  // THEN: Send to backend and UPDATE LOCAL STORAGE WITH SERVER RESPONSE
-                  fetch('http://localhost:5000/update_input_suggestion', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                      field: itemInfo.name || itemInfo.id,
-                      range: newRange,
-                      examples: newExamples,
-                      bad_examples: newBadExamples
-                    })
-                  })
-                  .then(res => res.json())
-                  .then(data => {
-                    console.log('Backend update successful:', data);
-                    
-                    // UPDATE LOCAL STORAGE WITH SERVER RESPONSE
-                    chrome.storage.local.get({ currentSuggestions: [] }, function(storageResult) {
-                      const updatedSuggestions = storageResult.currentSuggestions || [];
-                      
-                      if (suggestionIdx < updatedSuggestions.length) {
-                        // Update with server response values
-                        if (data.range !== undefined) {
-                          updatedSuggestions[suggestionIdx].range = data.range;
-                          console.log('Updated range from server:', data.range);
-                        }
-                        if (data.new_examples !== undefined) {
-                          updatedSuggestions[suggestionIdx].examples = data.new_examples;
-                          console.log('Updated examples from server:', data.new_examples);
-                        }
-                        if (data.new_bad_examples !== undefined) {
-                          updatedSuggestions[suggestionIdx].bad_examples = data.new_bad_examples;
-                          console.log('Updated bad examples from server:', data.new_bad_examples);
-                        }
-                        
-                        // Save the server-updated data to storage
-                        chrome.storage.local.set({ currentSuggestions: updatedSuggestions }, function() {
-                          console.log('Server response stored in local storage:', updatedSuggestions[suggestionIdx]);
-                          
-                          // Send another completion message with updated data
-                          if (event.source && !event.source.closed) {
-                            console.log('Sending server update to popup');
-                            event.source.postMessage({
-                              action: 'serverUpdateComplete',
-                              success: true,
-                              suggestion: updatedSuggestions[suggestionIdx]
-                            }, '*');
-                          }
-                        });
-                      }
-                    });
-                    
-                    // Show success notification
-                    const notification = document.createElement('div');
-                    notification.style.cssText = `
-                      position: fixed;
-                      top: 20px;
-                      right: 20px;
-                      background: #28a745;
-                      color: white;
-                      padding: 15px 20px;
-                      border-radius: 5px;
-                      z-index: 999999;
-                      box-shadow: 0 3px 10px rgba(0,0,0,0.2);
-                    `;
-                    notification.innerHTML = '<strong>Suggestion updated successfully!</strong><br>Good and bad examples saved.';
-                    document.body.appendChild(notification);
-                    
-                    setTimeout(() => {
-                      if (notification.parentNode) {
-                        notification.parentNode.removeChild(notification);
-                      }
-                    }, 3000);
-                  })
-                  .catch(error => {
-                    console.error('Backend update failed:', error);
-                    // Don't change button color back - keep the local changes
-                  });
-                });
-              } else {
-                console.error('Invalid suggestion index:', suggestionIdx);
-              }
-            });
-            break;
-        }
-      }
-    });
-  }
-
-  function showEditModal(item, idx, suggestions, questionMarkClickTime) {
-    // Record modal open event
-    const modalOpenTime = Date.now();
-    const modalOpenDuration = modalOpenTime - questionMarkClickTime;
-
-    record({
-      type: 'suggestion_modal_open',
-      time: modalOpenTime,
-      url: window.location.href,
-      tag: 'DIV',
-      id: 'input-suggestion-modal',
-      class: 'extension-modal',
-      value: null,
-      x: null,
-      y: null,
-      xpath: null,
-      field_name: item.name || item.id || '',
-      field_type: item.type || '',
-      suggestion_index: idx,
-      open_delay_ms: modalOpenDuration
-    });
-
-    // Always get the most recent data from storage
-    chrome.storage.local.get({ currentSuggestions: [] }, function (result) {
-      const currentSuggestions = result.currentSuggestions || [];
-      let currentItem = item;
-
-      // Use the most up-to-date data if available
-      if (currentSuggestions.length > idx) {
-        const storedItem = currentSuggestions[idx];
-        // Only update if we have the same field to avoid confusion
-        if ((storedItem.id && storedItem.id === item.id) ||
-          (storedItem.name && storedItem.name === item.name)) {
-          currentItem = storedItem;
-        }
-      }
-
-      // Create URL for the popup with data in query parameters
-      const extensionURL = chrome.runtime.getURL('suggestion_popup.html');
-
-      // Build URL with parameters
-      const params = new URLSearchParams();
-      params.append('id', currentItem.id || '');
-      params.append('name', currentItem.name || '');
-      params.append('type', currentItem.type || '');
-      params.append('idx', idx.toString());
-      params.append('timestamp', Date.now().toString()); // Add timestamp to prevent caching
-
-      // Add the range and examples if available
-      if (currentItem.range) {
-        params.append('range', currentItem.range);
-      }
-
-      if (currentItem.examples && currentItem.examples.length > 0) {
-        params.append('examples', JSON.stringify(currentItem.examples));
-      }
-
-      if (currentItem.bad_examples && currentItem.bad_examples.length > 0) {
-        params.append('bad_examples', JSON.stringify(currentItem.bad_examples));
-      }
-
-      const popupURL = `${extensionURL}?${params.toString()}`;
-
-      // Open popup window
-      const popupWidth = 650;  // Increased width for bad examples
-      const popupHeight = 550; // Increased height for bad examples
-      const left = (window.screen.width / 2) - (popupWidth / 2);
-      const top = (window.screen.height / 2) - (popupHeight / 2);
-
-      const uniqueWindowName = `edit_field_${idx}_${Date.now()}`;
-
-      const popupWindow = window.open(
-        popupURL,
-        uniqueWindowName,
-        `width=${popupWidth},height=${popupHeight},left=${left},top=${top},resizable=yes,scrollbars=yes,status=no,location=no,menubar=no,toolbar=no`
-      );
-
-      if (popupWindow) {
-        popupWindow.focus();
-      } else {
-        alert('Popup window was blocked. Please allow popups for this website.');
-      }
-    });
-  }
-
-  // Track right-clicked element
-  document.addEventListener('contextmenu', function(e) {
-    rightClickedElement = e.target;
-  }, true);
-
-  // Function to get element text content
-  function getElementText(element) {
-    if (!element) return '';
-    
-    // For input elements, get the value
-    if (element.tagName === 'INPUT' || element.tagName === 'TEXTAREA') {
-      return element.value || '';
-    }
-    
-    // For other elements, get text content
-    return element.textContent.trim() || element.innerText.trim() || '';
-  }
-
-  // Function to get target selector for an element
-  function getTargetSelector(element) {
-    if (!element) return '';
-    
-    // For verification commands, ALWAYS use XPath
-    return `xpath=${getXPath(element)}`;
-  }
-
-  // Function to determine appropriate value based on command and element
-  function getValueForCommand(command, element) {
-    const text = getElementText(element);
-    
-    switch (command) {
-      case 'verifyTitle':
-      case 'assertTitle':
-      case 'storeTitle':
-        return document.title;
-        
-      case 'verifyText':
-      case 'assertText':
-      case 'storeText':
-      case 'waitForTextPresent':
-      case 'waitForTextNotPresent':
-        return text;
-        
-      case 'verifyValue':
-      case 'assertValue':
-      case 'storeValue':
-      case 'waitForValue':
-      case 'waitForNotValue':
-        // For input elements, return the value
-        if (element.tagName === 'INPUT' || element.tagName === 'TEXTAREA') {
-          return element.value || '';
-        }
-        // For other elements, return text content
-        return text;
-        
-      case 'waitForElementPresent':
-      case 'waitForElementNotPresent':
-      case 'waitForVisible':
-      case 'waitForNotVisible':
-        return ''; // These commands don't need a value
-        
-      default:
-        return text;
-    }
-  }
-
-  // Function to record verification command
-  function recordVerificationCommand(command, element) {
-    if (!element) {
-      console.warn('No element selected for verification command');
-      return;
-    }
-
-    // Always use XPath for verification commands
-    const target = `xpath=${getXPath(element)}`;
-    const value = getValueForCommand(command, element);
-    const currentTime = Date.now();
-
-    // Create the recorded event
-    const details = {
-      type: 'verification_command',
-      command: command,
-      target: target,  // This will always be an XPath
-      value: value,
-      time: currentTime,
-      url: window.location.href,
-      element_tag: element.tagName,
-      element_id: element.id || '',
-      element_class: element.className || '',
-      xpath: getXPath(element)
-    };
-
-    console.log('Recording verification command:', details);
-
-    // Record the event
-    record(details);
-    
-    // Send snapshot
-    sendSnapshotToPython('verification_command', details);
-
-    // Show visual feedback
-    showCommandRecordedFeedback(command, target, value);
-  }
-
-  // Function to show visual feedback when command is recorded
-  function showCommandRecordedFeedback(command, target, value) {
-    const feedback = document.createElement('div');
-    feedback.style.cssText = `
-      position: fixed;
-      top: 20px;
-      right: 20px;
-      background: #4CAF50;
-      color: white;
-      padding: 12px 16px;
-      border-radius: 6px;
-      z-index: 999999;
-      font-family: Arial, sans-serif;
-      font-size: 14px;
-      box-shadow: 0 4px 12px rgba(0,0,0,0.3);
-      max-width: 400px;
-      word-wrap: break-word;
-    `;
-    
-    // Truncate XPath if too long for display
-    const displayTarget = target.length > 50 ? target.substring(0, 47) + '...' : target;
-    
-    feedback.innerHTML = `
-      <strong>Command Recorded:</strong><br>
-      <code style="background: rgba(255,255,255,0.2); padding: 2px 4px; border-radius: 3px;">${command}</code><br>
-      <small><strong>XPath:</strong> ${displayTarget}</small><br>
-      ${value ? `<small><strong>Value:</strong> ${value}</small>` : ''}
-    `;
-    
-    document.body.appendChild(feedback);
-    
-    // Remove feedback after 4 seconds (longer since XPath might be complex)
-    setTimeout(() => {
-      if (feedback.parentNode) {
-        feedback.parentNode.removeChild(feedback);
-      }
-    }, 4000);
-  }
-
-  // Listen for messages from background script
-  chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
-    // ...existing message handling...
 
     if (request && request.type === 'recordVerificationCommand') {
       const command = request.command;
-      
       if (rightClickedElement) {
         recordVerificationCommand(command, rightClickedElement);
         sendResponse({ success: true, command: command });
       } else {
-        console.warn('No right-clicked element found');
         sendResponse({ success: false, error: 'No element selected' });
       }
       return true;
     }
-
-    // ...rest of existing message handling...
-    return true;
   });
 
-  // ...rest of existing code...
+  // ---------------------------------------------------------------------------
+  // Suggestion Injection & In-Page Modal UI
+  // ---------------------------------------------------------------------------
+
+  function injectInputSuggestionButtons(suggestions) {
+    // Remove existing suggestion buttons
+    document.querySelectorAll('.input-suggestion-btn').forEach(b => b.remove());
+
+    if (!Array.isArray(suggestions) || suggestions.length === 0) {
+      console.log('No suggestions to inject.');
+      return;
+    }
+
+    console.log(`Injecting ${suggestions.length} suggestion button(s)...`);
+
+    suggestions.forEach((item, idx) => {
+      // Find element in page by id or name
+      let el = null;
+      if (item.id) {
+        el = document.getElementById(item.id);
+      }
+      if (!el && item.name) {
+        el = document.querySelector(`[name="${item.name}"]`);
+      }
+      if (!el && item.id) {
+        el = document.querySelector(`[id*="${item.id}"]`);
+      }
+
+      if (!el) {
+        console.warn('Could not find element for suggestion:', item);
+        return;
+      }
+
+      // Create '?' button next to the field
+      const btn = document.createElement('button');
+      btn.textContent = '?';
+      btn.className = 'input-suggestion-btn llm-recorder-ui';
+      btn.title = `هوش مصنوعی: مشاهده پیشنهادات تست برای ${item.name || item.id}`;
+      btn.setAttribute('data-idx', idx);
+
+      btn.style.cssText = `
+        position: absolute !important;
+        z-index: 999999 !important;
+        width: 24px !important;
+        height: 24px !important;
+        min-width: 24px !important;
+        border-radius: 50% !important;
+        background: linear-gradient(135deg, #0d6efd, #0b5ed7) !important;
+        color: #ffffff !important;
+        border: 2px solid #ffffff !important;
+        box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3) !important;
+        font-family: Arial, sans-serif !important;
+        font-size: 13px !important;
+        font-weight: bold !important;
+        line-height: 1 !important;
+        cursor: pointer !important;
+        display: inline-flex !important;
+        align-items: center !important;
+        justify-content: center !important;
+        padding: 0 !important;
+        margin: 0 !important;
+        transition: transform 0.15s, background 0.2s !important;
+      `;
+
+      function positionButton() {
+        if (!el || !document.contains(el)) return;
+        const rect = el.getBoundingClientRect();
+        const top = rect.top + window.pageYOffset + Math.max(0, (rect.height - 24) / 2);
+        const left = rect.right + window.pageXOffset + 6;
+        btn.style.top = `${top}px`;
+        btn.style.left = `${left}px`;
+      }
+
+      positionButton();
+      window.addEventListener('scroll', positionButton, { passive: true });
+      window.addEventListener('resize', positionButton, { passive: true });
+
+      btn.onmouseenter = () => { btn.style.transform = 'scale(1.15)'; };
+      btn.onmouseleave = () => { btn.style.transform = 'scale(1)'; };
+
+      btn.onclick = (e) => {
+        e.stopPropagation();
+        e.preventDefault();
+        openInPageModal(item, btn);
+      };
+
+      document.body.appendChild(btn);
+    });
+  }
+
+  function openInPageModal(item, triggerBtn) {
+    // Remove existing modal if any
+    const existing = document.getElementById('llm-suggestion-modal-overlay');
+    if (existing) existing.remove();
+
+    const overlay = document.createElement('div');
+    overlay.id = 'llm-suggestion-modal-overlay';
+    overlay.className = 'llm-recorder-ui';
+    overlay.style.cssText = `
+      position: fixed !important;
+      top: 0 !important;
+      left: 0 !important;
+      width: 100vw !important;
+      height: 100vh !important;
+      background: rgba(0, 0, 0, 0.5) !important;
+      backdrop-filter: blur(2px) !important;
+      z-index: 1000000 !important;
+      display: flex !important;
+      align-items: center !important;
+      justify-content: center !important;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Vazirmatn", Tahoma, sans-serif !important;
+      direction: rtl !important;
+      text-align: right !important;
+    `;
+
+    const modal = document.createElement('div');
+    modal.style.cssText = `
+      background: #ffffff !important;
+      width: 580px !important;
+      max-width: 92vw !important;
+      max-height: 88vh !important;
+      overflow-y: auto !important;
+      border-radius: 12px !important;
+      box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3) !important;
+      padding: 22px !important;
+      box-sizing: border-box !important;
+      color: #212529 !important;
+    `;
+
+    const fieldTitle = item.name || item.id || 'فیلد ورودی';
+    const fieldType = item.type || 'text';
+    const rangeVal = item.range || '';
+    const examplesVal = (item.examples || []).join('\n');
+    const badExamplesVal = (item.bad_examples || []).join('\n');
+
+    modal.innerHTML = `
+      <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #dee2e6; padding-bottom: 10px; margin-bottom: 16px;">
+        <div>
+          <h3 style="margin: 0; font-size: 17px; color: #0d6efd; font-weight: bold;">پیشنهادات تست فیلد: <span style="color:#212529;">${fieldTitle}</span></h3>
+          <small style="color: #6c757d; font-size: 12px;">نوع فیلد: ${fieldType}</small>
+        </div>
+        <button id="modal-close-x" style="background:none; border:none; font-size: 22px; cursor:pointer; color: #888;">&times;</button>
+      </div>
+
+      <div style="margin-bottom: 14px;">
+        <label style="display: block; font-weight: bold; margin-bottom: 6px; font-size: 13px; color: #333;">قوانین اعتبارسنجی (محدوده فیلد):</label>
+        <textarea id="modal-range" style="width: 100%; height: 60px; padding: 8px 10px; border: 1px solid #ced4da; border-radius: 6px; font-size: 13px; box-sizing: border-box; resize: vertical; direction: rtl;">${rangeVal}</textarea>
+      </div>
+
+      <div style="margin-bottom: 14px;">
+        <label style="display: block; font-weight: bold; margin-bottom: 6px; font-size: 13px; color: #198754;">مثال‌های معتبر و صحیح (هر مورد در یک خط):</label>
+        <textarea id="modal-examples" style="width: 100%; height: 100px; padding: 8px 10px; border: 1px solid #198754; border-radius: 6px; font-size: 13px; box-sizing: border-box; resize: vertical; direction: ltr; text-align: left;">${examplesVal}</textarea>
+      </div>
+
+      <div style="margin-bottom: 18px;">
+        <label style="display: block; font-weight: bold; margin-bottom: 6px; font-size: 13px; color: #dc3545;">مثال‌های نامعتبر / تست منفی (هر مورد در یک خط):</label>
+        <textarea id="modal-bad-examples" style="width: 100%; height: 90px; padding: 8px 10px; border: 1px solid #dc3545; border-radius: 6px; font-size: 13px; box-sizing: border-box; resize: vertical; background: #fff8f8; direction: ltr; text-align: left;">${badExamplesVal}</textarea>
+      </div>
+
+      <div id="modal-status-msg" style="margin-bottom: 12px; font-size: 13px; display: none;"></div>
+
+      <div style="display: flex; justify-content: flex-end; gap: 10px;">
+        <button id="modal-cancel-btn" style="padding: 8px 16px; border: 1px solid #ced4da; background: #f8f9fa; border-radius: 6px; cursor: pointer; font-size: 13px;">انصراف</button>
+        <button id="modal-update-btn" style="padding: 8px 16px; border: none; background: #0d6efd; color: white; border-radius: 6px; cursor: pointer; font-size: 13px; font-weight: bold;">تولید مجدد با AI</button>
+        <button id="modal-confirm-btn" style="padding: 8px 18px; border: none; background: #198754; color: white; border-radius: 6px; cursor: pointer; font-size: 13px; font-weight: bold;">تأیید و ذخیره</button>
+      </div>
+    `;
+
+    overlay.appendChild(modal);
+    document.body.appendChild(overlay);
+
+    function closeModal() {
+      overlay.remove();
+    }
+
+    document.getElementById('modal-close-x').onclick = closeModal;
+    document.getElementById('modal-cancel-btn').onclick = closeModal;
+    overlay.onclick = (e) => { if (e.target === overlay) closeModal(); };
+
+    // Confirm button: saves to server (/confirm_suggestion) and updates ? button state
+    document.getElementById('modal-confirm-btn').onclick = function () {
+      const confirmedRange = document.getElementById('modal-range').value.trim();
+      const confirmedExamples = document.getElementById('modal-examples').value.split('\n').map(s => s.trim()).filter(Boolean);
+      const confirmedBad = document.getElementById('modal-bad-examples').value.split('\n').map(s => s.trim()).filter(Boolean);
+
+      const confirmBtn = document.getElementById('modal-confirm-btn');
+      confirmBtn.disabled = true;
+      confirmBtn.textContent = 'در حال ذخیره...';
+
+      fetch('http://localhost:5000/confirm_suggestion', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          field: item.id || item.name,
+          range: confirmedRange,
+          examples: confirmedExamples,
+          bad_examples: confirmedBad,
+          url: window.location.href,
+          time: Date.now()
+        })
+      })
+      .then(res => res.json())
+      .then(resData => {
+        // Turn button green
+        if (triggerBtn) {
+          triggerBtn.style.background = 'linear-gradient(135deg, #198754, #146c43) !important';
+          triggerBtn.title = 'تأیید شد ✓';
+        }
+        item.range = confirmedRange;
+        item.examples = confirmedExamples;
+        item.bad_examples = confirmedBad;
+        closeModal();
+      })
+      .catch(err => {
+        confirmBtn.disabled = false;
+        confirmBtn.textContent = 'تأیید و ذخیره';
+        const msg = document.getElementById('modal-status-msg');
+        msg.style.display = 'block';
+        msg.style.color = '#dc3545';
+        msg.textContent = 'خطا در ارتباط با سرور پایتون: ' + err.message;
+      });
+    };
+
+    // Update / Regenerate with AI button: calls /update_input_suggestion
+    document.getElementById('modal-update-btn').onclick = function () {
+      const updateBtn = document.getElementById('modal-update-btn');
+      updateBtn.disabled = true;
+      updateBtn.textContent = 'در حال پردازش با هوش مصنوعی...';
+
+      const currentRange = document.getElementById('modal-range').value.trim();
+      const currentExamples = document.getElementById('modal-examples').value.split('\n').map(s => s.trim()).filter(Boolean);
+      const currentBad = document.getElementById('modal-bad-examples').value.split('\n').map(s => s.trim()).filter(Boolean);
+
+      fetch('http://localhost:5000/update_input_suggestion', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          field: item.id || item.name,
+          range: currentRange,
+          examples: currentExamples,
+          bad_examples: currentBad
+        })
+      })
+      .then(res => res.json())
+      .then(data => {
+        updateBtn.disabled = false;
+        updateBtn.textContent = 'تولید مجدد با AI';
+
+        if (data.range) document.getElementById('modal-range').value = data.range;
+        if (data.new_examples) document.getElementById('modal-examples').value = data.new_examples.join('\n');
+        if (data.new_bad_examples) document.getElementById('modal-bad-examples').value = data.new_bad_examples.join('\n');
+
+        const msg = document.getElementById('modal-status-msg');
+        msg.style.display = 'block';
+        msg.style.color = '#198754';
+        msg.textContent = 'مثال‌ها با موفقیت توسط هوش مصنوعی به‌روزرسانی شدند!';
+      })
+      .catch(err => {
+        updateBtn.disabled = false;
+        updateBtn.textContent = 'تولید مجدد با AI';
+        const msg = document.getElementById('modal-status-msg');
+        msg.style.display = 'block';
+        msg.style.color = '#dc3545';
+        msg.textContent = 'خطا در ارتباط با هوش مصنوعی: ' + err.message;
+      });
+    };
+  }
+
+  // ---------------------------------------------------------------------------
+  // Verification Commands Feedback
+  // ---------------------------------------------------------------------------
+
+  function recordVerificationCommand(command, element) {
+    if (!element) return;
+    const target = `xpath=${getXPath(element)}`;
+    const value = getElementValue(element);
+    const details = {
+      type: 'verification_command',
+      command: command,
+      target: target,
+      value: value,
+      time: Date.now(),
+      url: window.location.href,
+      element_tag: element.tagName,
+      element_id: element.id || '',
+      xpath: getXPath(element)
+    };
+    record(details);
+
+    // Visual feedback
+    const toast = document.createElement('div');
+    toast.className = 'llm-recorder-ui';
+    toast.style.cssText = `
+      position: fixed; bottom: 20px; left: 20px; background: #198754; color: white;
+      padding: 10px 16px; border-radius: 8px; z-index: 1000000; font-family: sans-serif;
+      font-size: 13px; box-shadow: 0 4px 12px rgba(0,0,0,0.25);
+    `;
+    toast.textContent = `دستور ${command} با موفقیت ثبت شد.`;
+    document.body.appendChild(toast);
+    setTimeout(() => toast.remove(), 2500);
+  }
+
 })();

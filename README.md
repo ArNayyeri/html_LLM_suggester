@@ -8,7 +8,7 @@ A smart web form analyzer, input suggester, and test recorder designed for **Kat
 
 - **Automated Form Field Extraction:** Detects all interactive `<input>`, `<textarea>`, and `<select>` elements, associating labels, placeholders, and validation constraints without overwhelming LLMs with raw HTML.
 - **Multi-Backend LLM Support:**
-  - **Remote GPU Server:** Connects to any remote Ollama/OpenAI-compatible GPU endpoint (e.g., `185.239.2.48:11434`) with dynamic IP/host selection.
+  - **Remote GPU Server:** Connects to any remote Ollama/OpenAI-compatible GPU endpoint (e.g., `http://<your-gpu-ip>:3000`) with dynamic IP/host and port selection.
   - **OpenRouter Free Tier with Auto-Failover:** Automatically handles upstream rate limits (`429`) and timeouts (`503/504`) by gracefully falling back across top free models (`gemma-4`, `nemotron-3.5-lightning`, `liquid-lfm`).
   - **Local Ollama:** Fully offline execution on `localhost:11434`.
 - **In-Page Interactive Suggestion Modal:** Click the blue `?` button next to any field on the webpage to review, edit, regenerate with AI, or confirm test suggestions directly inside the page.
@@ -60,7 +60,7 @@ When starting `recorder_server.py`, an interactive menu lets you choose your LLM
    HTML LLM Suggester & Katalon Recorder Server
 ================================================================
 Select LLM Backend:
-  1) GPU Remote Server   [Default host: 185.239.2.48:11434]
+  1) GPU Remote Server   [Port: 3000]
   2) OpenRouter Free API (with automatic failover across free models)
   3) Local Ollama        [http://localhost:11434/v1]
 Enter choice (1/2/3, default=1): 
@@ -75,10 +75,9 @@ You can create or edit a file named `tokens` in the project root to store creden
 sk-or-v1-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 # Line 2: GPU Server Token
 sk-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
-# Line 3 (optional): GPU Host / IP (default: 185.239.2.48)
-185.239.2.48
-# Line 4 (optional): GPU Port (default: 11434)
-11434
+# Line 3 (optional): GPU Host / IP (or entered interactively on prompt)
+# Line 4 (optional): GPU Port (default: 3000)
+3000
 ```
 
 *Key-value syntax is also supported (e.g., `OPENROUTER_TOKEN=...`, `GPU_HOST=...`).*
@@ -89,7 +88,7 @@ The server also supports headless/scripted execution with flags:
 
 ```bash
 # Run with GPU backend:
-python recorder_server.py --mode gpu --gpu-host 185.239.2.48 --gpu-port 11434 --model gemma4:e4b
+python recorder_server.py --mode gpu --gpu-host <your-gpu-ip> --gpu-port 3000 --model gemma4:e4b
 
 # Run with OpenRouter free models:
 python recorder_server.py --mode openrouter --token sk-or-v1-...

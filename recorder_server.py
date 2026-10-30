@@ -30,8 +30,8 @@ import tkinter as tk
 from tkinter import ttk, scrolledtext, messagebox
 
 # Default configuration values
-DEFAULT_GPU_HOST = "185.239.2.48"
-DEFAULT_GPU_PORT = 11434
+DEFAULT_GPU_HOST = ""
+DEFAULT_GPU_PORT = 3000
 DEFAULT_GPU_MODEL = "gemma4:e4b"
 
 DEFAULT_LOCAL_URL = "http://localhost:11434/v1"
@@ -57,13 +57,13 @@ def load_tokens_file(file_path="tokens"):
     Format support:
       Line 1: OpenRouter API Token
       Line 2: GPU Server Token
-      Line 3 (optional): GPU Host / IP (e.g. 185.239.2.48)
-      Line 4 (optional): GPU Port (default 11434)
+      Line 3 (optional): GPU Host / IP (e.g. 192.168.1.50)
+      Line 4 (optional): GPU Port (default 3000)
     Also supports KEY=VALUE format (e.g., OPENROUTER_TOKEN=..., GPU_HOST=...).
     """
     config = {
         'openrouter_token': '',
-        'gpu_token': 'ollama',
+        'gpu_token': '',
         'gpu_host': DEFAULT_GPU_HOST,
         'gpu_port': DEFAULT_GPU_PORT,
     }
@@ -141,7 +141,7 @@ selected_mode = args.mode
 cli_model = args.model
 cli_token = args.token
 server_port = args.port
-gpu_host = args.gpu_host or tokens_cfg.get('gpu_host', DEFAULT_GPU_HOST)
+gpu_host = args.gpu_host or tokens_cfg.get('gpu_host', '')
 gpu_port = args.gpu_port or tokens_cfg.get('gpu_port', DEFAULT_GPU_PORT)
 
 # Interactive configuration if run directly in terminal without CLI flags
@@ -150,7 +150,8 @@ if not selected_mode and sys.stdin.isatty():
     print("   HTML LLM Suggester & Katalon Recorder Server")
     print("=" * 64)
     print("Select LLM Backend:")
-    print(f"  1) GPU Remote Server   [Default host: {gpu_host}:{gpu_port}]")
+    host_display = f"{gpu_host}:{gpu_port}" if gpu_host else f"Port: {gpu_port}"
+    print(f"  1) GPU Remote Server   [{host_display}]")
     print("  2) OpenRouter Free API (with automatic failover across free models)")
     print(f"  3) Local Ollama        [{DEFAULT_LOCAL_URL}]")
     choice = input("Enter choice (1/2/3, default=1): ").strip()
@@ -161,10 +162,17 @@ if not selected_mode and sys.stdin.isatty():
         selected_mode = 'local'
     else:
         selected_mode = 'gpu'
-        # Ask for dynamic GPU IP/Host
-        host_input = input(f"Enter GPU IP/Host [default: {gpu_host}]: ").strip()
-        if host_input:
-            gpu_host = host_input
+        # Ask for dynamic GPU IP/Host (NOT hardcoded in code)
+        if gpu_host:
+            host_input = input(f"Enter GPU IP/Host [default: {gpu_host}]: ").strip()
+            if host_input:
+                gpu_host = host_input
+        else:
+            while not gpu_host:
+                gpu_host = input("Enter GPU IP/Host: ").strip()
+                if not gpu_host:
+                    print("[!] GPU IP/Host is required.")
+
         port_input = input(f"Enter GPU Port [default: {gpu_port}]: ").strip()
         if port_input:
             try:
@@ -174,6 +182,8 @@ if not selected_mode and sys.stdin.isatty():
 elif not selected_mode:
     # Default when imported or running headless
     selected_mode = 'gpu'
+    if not gpu_host:
+        gpu_host = tokens_cfg.get('gpu_host', '127.0.0.1')
 
 # Configure client based on selected mode
 if selected_mode == 'openrouter':
@@ -200,7 +210,10 @@ elif selected_mode == 'local':
 
 else:  # GPU mode
     base_url = f"http://{gpu_host}:{gpu_port}/v1"
-    token = cli_token or tokens_cfg.get('gpu_token') or 'ollama'
+    token = cli_token or tokens_cfg.get('gpu_token')
+    if not token and sys.stdin.isatty():
+        token = input("Enter GPU API Token: ").strip()
+    token = token or 'ollama'
     active_model = cli_model or DEFAULT_GPU_MODEL
     client = OpenAI(base_url=base_url, api_key=token)
     print(f"\n[*] Mode: GPU Server ({base_url})")
@@ -246,7 +259,9 @@ def call_llm(messages, max_tokens=1500, temperature=0.2):
                     temperature=temperature,
                     max_tokens=max_tokens
                 )
-                return res.choices[0].message.content.strip()
+                msg = res.choices[0].message
+                raw_text = msg.content or getattr(msg, 'reasoning_content', '') or ''
+                return raw_text.strip()
             except Exception as e:
                 err_str = str(e)
                 print(f"[!] OpenRouter model '{m}' failed ({err_str[:80]}), trying next free model...")
@@ -262,7 +277,9 @@ def call_llm(messages, max_tokens=1500, temperature=0.2):
             temperature=temperature,
             max_tokens=max_tokens
         )
-        return res.choices[0].message.content.strip()
+        msg = res.choices[0].message
+        raw_text = msg.content or getattr(msg, 'reasoning_content', '') or ''
+        return raw_text.strip()
 
 
 # ==============================================================================

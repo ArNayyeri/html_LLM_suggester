@@ -1,14 +1,16 @@
 {
   "manifest_version": 3,
-  "name": "Web Recorder",
-  "version": "1.0",
+  "name": "Katalon AI Web Recorder & Form Suggester",
+  "version": "1.1.0",
+  "description": "Smart web recorder for Katalon Studio tests with AI-powered form field analysis and test data generation.",
   "permissions": [
     "storage",
     "activeTab",
     "contextMenus"
   ],
   "host_permissions": [
-    "http://localhost:5000/*"
+    "http://localhost:5000/*",
+    "http://127.0.0.1:5000/*"
   ],
   "background": {
     "service_worker": "background.js"
@@ -20,12 +22,17 @@
     }
   ],
   "action": {
-    "default_popup": "popup.html"
-  },
-  "web_accessible_resources": [
-    {
-      "resources": ["suggestion_popup.html"],
-      "matches": ["<all_urls>"]
+    "default_popup": "popup.html",
+    "default_title": "AI Web Recorder",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
     }
-  ]
+  },
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  }
 }

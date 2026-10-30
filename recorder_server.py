@@ -29,76 +29,182 @@ from openai import OpenAI
 import tkinter as tk
 from tkinter import ttk, scrolledtext, messagebox
 
-# Default endpoints and models
-OLLAMA_LOCAL_URL = 'http://localhost:11434/v1'
-OPENROUTER_URL = 'https://openrouter.ai/api/v1'
-GPU_URL = "http://185.239.2.48:3000/v1"
-
+# Default configuration values
+DEFAULT_GPU_HOST = "185.239.2.48"
+DEFAULT_GPU_PORT = 11434
 DEFAULT_GPU_MODEL = "gemma4:e4b"
-DEFAULT_LOCAL_MODEL = "Llama3.2:3b"
-DEFAULT_OPENROUTER_MODEL = "recursive/flint-v1.0:free"
 
-def check_port_available(port):
+DEFAULT_LOCAL_URL = "http://localhost:11434/v1"
+DEFAULT_LOCAL_MODEL = "Llama3.2:3b"
+
+DEFAULT_OPENROUTER_URL = "https://openrouter.ai/api/v1"
+OPENROUTER_FREE_MODELS = [
+    "google/gemma-4-26b-a4b-it:free",
+    "nvidia/nemotron-3.5-lightning:free",
+    "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free",
+    "liquid/lfm-2.5-2.6b:free",
+    "google/gemma-4-31b-it:free"
+]
+
+
+# ==============================================================================
+# Token & Configuration Loader
+# ==============================================================================
+
+def load_tokens_file(file_path="tokens"):
+    """
+    Reads tokens and configuration from 'tokens' file if present.
+    Format support:
+      Line 1: OpenRouter API Token
+      Line 2: GPU Server Token
+      Line 3 (optional): GPU Host / IP (e.g. 185.239.2.48)
+      Line 4 (optional): GPU Port (default 11434)
+    Also supports KEY=VALUE format (e.g., OPENROUTER_TOKEN=..., GPU_HOST=...).
+    """
+    config = {
+        'openrouter_token': '',
+        'gpu_token': 'ollama',
+        'gpu_host': DEFAULT_GPU_HOST,
+        'gpu_port': DEFAULT_GPU_PORT,
+    }
+    if not os.path.exists(file_path):
+        return config
+
+    try:
+        with open(file_path, 'r', encoding='utf-8') as f:
+            lines = [line.strip() for line in f if line.strip() and not line.strip().startswith('#')]
+
+        positional_idx = 0
+        for line in lines:
+            if '=' in line:
+                k, v = line.split('=', 1)
+                k = k.strip().upper()
+                v = v.strip()
+                if k in ('OPENROUTER_TOKEN', 'OPENROUTER_KEY', 'OPENROUTER'):
+                    config['openrouter_token'] = v
+                elif k in ('GPU_TOKEN', 'GPU_KEY'):
+                    config['gpu_token'] = v
+                elif k in ('GPU_HOST', 'GPU_IP', 'IP'):
+                    config['gpu_host'] = v
+                elif k in ('GPU_PORT', 'PORT'):
+                    try:
+                        config['gpu_port'] = int(v)
+                    except ValueError:
+                        pass
+            else:
+                if positional_idx == 0:
+                    config['openrouter_token'] = line
+                elif positional_idx == 1:
+                    config['gpu_token'] = line
+                elif positional_idx == 2:
+                    config['gpu_host'] = line
+                elif positional_idx == 3:
+                    try:
+                        config['gpu_port'] = int(line)
+                    except ValueError:
+                        pass
+                positional_idx += 1
+    except Exception as e:
+        print(f"[!] Warning reading tokens file: {e}")
+
+    return config
+
+
+def check_port_available(port_num):
     """Check if a port is available for use"""
     try:
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         sock.settimeout(1)
-        sock.bind(('127.0.0.1', port))
+        sock.bind(('127.0.0.1', port_num))
         sock.close()
         return True
     except OSError:
         return False
 
-# Parse CLI arguments or prompt interactively
+
+# ==============================================================================
+# Initialization & Setup
+# ==============================================================================
+
+tokens_cfg = load_tokens_file("tokens")
+
 parser = argparse.ArgumentParser(description="HTML LLM Suggester & Katalon Recorder Server")
-parser.add_argument("--mode", choices=["gpu", "local", "openrouter"], default=None, help="Backend mode")
+parser.add_argument("--mode", choices=["gpu", "openrouter", "local"], default=None, help="Backend mode")
+parser.add_argument("--gpu-host", type=str, default=None, help="GPU server host/IP")
+parser.add_argument("--gpu-port", type=int, default=None, help="GPU server port")
 parser.add_argument("--model", type=str, default=None, help="Model name")
 parser.add_argument("--token", type=str, default=None, help="API token")
-parser.add_argument("--port", type=int, default=5000, help="Port to run on")
+parser.add_argument("--port", type=int, default=5000, help="Port to run Flask server on")
 args, _ = parser.parse_known_args()
 
-mode = args.mode
-model_name = args.model
-api_token = args.token
-port = args.port
+selected_mode = args.mode
+cli_model = args.model
+cli_token = args.token
+server_port = args.port
+gpu_host = args.gpu_host or tokens_cfg.get('gpu_host', DEFAULT_GPU_HOST)
+gpu_port = args.gpu_port or tokens_cfg.get('gpu_port', DEFAULT_GPU_PORT)
 
-if not mode:
-    # If stdin is connected, ask user with easy defaults
-    if sys.stdin.isatty():
-        print("=" * 60)
-        print("  HTML LLM Suggester & Katalon Recorder Server")
-        print("=" * 60)
-        print("Select LLM Backend:")
-        print("  1) GPU Remote Server [http://185.239.2.48:11434] (Default)")
-        print("  2) Local Ollama      [http://localhost:11434]")
-        print("  3) OpenRouter API    [https://openrouter.ai]")
-        choice = input("Enter choice (1/2/3, default=1): ").strip()
-        if choice == '2':
-            mode = 'local'
-        elif choice == '3':
-            mode = 'openrouter'
-        else:
-            mode = 'gpu'
+# Interactive configuration if run directly in terminal without CLI flags
+if not selected_mode and sys.stdin.isatty():
+    print("=" * 64)
+    print("   HTML LLM Suggester & Katalon Recorder Server")
+    print("=" * 64)
+    print("Select LLM Backend:")
+    print(f"  1) GPU Remote Server   [Default host: {gpu_host}:{gpu_port}]")
+    print("  2) OpenRouter Free API (with automatic failover across free models)")
+    print(f"  3) Local Ollama        [{DEFAULT_LOCAL_URL}]")
+    choice = input("Enter choice (1/2/3, default=1): ").strip()
+
+    if choice == '2':
+        selected_mode = 'openrouter'
+    elif choice == '3':
+        selected_mode = 'local'
     else:
-        mode = 'gpu'
+        selected_mode = 'gpu'
+        # Ask for dynamic GPU IP/Host
+        host_input = input(f"Enter GPU IP/Host [default: {gpu_host}]: ").strip()
+        if host_input:
+            gpu_host = host_input
+        port_input = input(f"Enter GPU Port [default: {gpu_port}]: ").strip()
+        if port_input:
+            try:
+                gpu_port = int(port_input)
+            except ValueError:
+                pass
+elif not selected_mode:
+    # Default when imported or running headless
+    selected_mode = 'gpu'
 
-if mode == 'local':
-    base_url = OLLAMA_LOCAL_URL
-    token = api_token or 'ollama'
-    model_name = model_name or DEFAULT_LOCAL_MODEL
-elif mode == 'openrouter':
-    base_url = OPENROUTER_URL
-    token = api_token or input("Enter your OpenRouter API token: ").strip()
-    model_name = model_name or DEFAULT_OPENROUTER_MODEL
+# Configure client based on selected mode
+if selected_mode == 'openrouter':
+    base_url = DEFAULT_OPENROUTER_URL
+    token = cli_token or tokens_cfg.get('openrouter_token')
+    if not token and sys.stdin.isatty():
+        token = input("Enter OpenRouter API token: ").strip()
+    active_model = cli_model or OPENROUTER_FREE_MODELS[0]
+    extra_headers = {
+        'HTTP-Referer': 'https://github.com/ArNayyeri/html_LLM_suggester',
+        'X-Title': 'HTML LLM Suggester'
+    }
+    client = OpenAI(base_url=base_url, api_key=token or 'none', default_headers=extra_headers)
+    print(f"\n[*] Mode: OpenRouter Free API")
+    print(f"[*] Primary Model: {active_model} (Fallbacks: {len(OPENROUTER_FREE_MODELS)-1} models)")
+
+elif selected_mode == 'local':
+    base_url = DEFAULT_LOCAL_URL
+    token = cli_token or 'ollama'
+    active_model = cli_model or DEFAULT_LOCAL_MODEL
+    client = OpenAI(base_url=base_url, api_key=token)
+    print(f"\n[*] Mode: Local Ollama ({base_url})")
+    print(f"[*] Model: {active_model}")
+
 else:  # GPU mode
-    base_url = GPU_URL
-    token = api_token or input("Enter your GPU API token: ").strip()
-    model_name = model_name or DEFAULT_GPU_MODEL
-
-print(f"\n[*] Configured LLM: {model_name} via {base_url}")
-
-# Initialize OpenAI client
-client = OpenAI(base_url=base_url, api_key=token)
+    base_url = f"http://{gpu_host}:{gpu_port}/v1"
+    token = cli_token or tokens_cfg.get('gpu_token') or 'ollama'
+    active_model = cli_model or DEFAULT_GPU_MODEL
+    client = OpenAI(base_url=base_url, api_key=token)
+    print(f"\n[*] Mode: GPU Server ({base_url})")
+    print(f"[*] Model: {active_model}")
 
 app = Flask(__name__)
 CORS(app)
@@ -113,10 +219,50 @@ RUN_ID = f"run_{_run_time}_{_run_uid}"
 RUN_SAVE_DIR = os.path.join(SAVE_DIR, RUN_ID)
 os.makedirs(RUN_SAVE_DIR, exist_ok=True)
 print(f"[*] Session Run ID: {RUN_ID}")
-print(f"[*] Artifacts will be saved to: {RUN_SAVE_DIR}")
+print(f"[*] Artifacts directory: {RUN_SAVE_DIR}")
 
 # In-memory storage for user confirmed suggestions
 CONFIRMED_FIELDS = {}
+
+
+# ==============================================================================
+# Resilient LLM Caller (with Free Model Failover)
+# ==============================================================================
+
+def call_llm(messages, max_tokens=1500, temperature=0.2):
+    """
+    Executes a chat completion call with automatic model failover.
+    For OpenRouter, if a free model is rate-limited (429) or busy (503/504),
+    it dynamically tries the next free model in OPENROUTER_FREE_MODELS.
+    """
+    if selected_mode == 'openrouter':
+        models_to_try = [active_model] + [m for m in OPENROUTER_FREE_MODELS if m != active_model]
+        last_error = None
+        for m in models_to_try:
+            try:
+                res = client.chat.completions.create(
+                    model=m,
+                    messages=messages,
+                    temperature=temperature,
+                    max_tokens=max_tokens
+                )
+                return res.choices[0].message.content.strip()
+            except Exception as e:
+                err_str = str(e)
+                print(f"[!] OpenRouter model '{m}' failed ({err_str[:80]}), trying next free model...")
+                last_error = e
+                time.sleep(0.8)
+        raise RuntimeError(f"All OpenRouter free models failed: {last_error}")
+
+    else:
+        # GPU or Local
+        res = client.chat.completions.create(
+            model=active_model,
+            messages=messages,
+            temperature=temperature,
+            max_tokens=max_tokens
+        )
+        return res.choices[0].message.content.strip()
 
 
 # ==============================================================================
@@ -143,7 +289,6 @@ def clean_llm_json(raw_text):
         try:
             return json.loads(candidate)
         except Exception:
-            # Try removing trailing commas: , ] or , }
             fixed = re.sub(r',\s*([\]\}])', r'\1', candidate)
             try:
                 return json.loads(fixed)
@@ -181,9 +326,9 @@ def clean_llm_json(raw_text):
 
 def extract_form_fields(html):
     """
-    Extract all relevant interactive form elements from HTML with their metadata.
-    Does NOT overwhelm the LLM with 60k tokens of raw HTML; instead extracts
-    concise structural context (< 300 tokens per field).
+    Extract all relevant interactive form elements (up to 4-10 fields) with metadata.
+    Avoids sending raw HTML dumps; extracts concise structural context (< 300 tokens per field).
+    Supports inputs (with/without type attribute), textareas, and selects.
     """
     soup = BeautifulSoup(html, 'html.parser')
     page_title = soup.title.string.strip() if soup.title and soup.title.string else ''
@@ -202,14 +347,14 @@ def extract_form_fields(html):
         el_id = el.get('id', '').strip()
         name = el.get('name', '').strip()
 
-        # In HTML, default input type is 'text' if not specified
+        # In standard HTML, default input type is 'text' if not specified
         el_type = el.get('type', 'text').lower().strip() if tag == 'input' else tag
 
         # Only accept text-like input types, textareas, and selects
         if tag == 'input' and el_type not in valid_input_types:
             continue
 
-        # Visibility checks: skip hidden inputs or elements styled as display:none
+        # Skip hidden inputs or elements styled as display:none
         style = el.get('style', '').lower()
         if 'display:none' in style.replace(' ', '') or 'visibility:hidden' in style.replace(' ', ''):
             continue
@@ -255,7 +400,7 @@ def extract_form_fields(html):
     return fields
 
 
-def generate_field_suggestions(client_instance, model, fields):
+def generate_field_suggestions(fields):
     """
     Generate realistic test input values and validation rules for fields in ONE prompt.
     Produces high quality Persian/English suggestions.
@@ -263,11 +408,8 @@ def generate_field_suggestions(client_instance, model, fields):
     if not fields:
         return []
 
-    # Map for quick lookup to preserve exact DOM IDs and names
-    dom_map = {f['id']: f for f in fields}
-
     prompt = f"""You are a test automation and QA expert.
-Analyze the following form field(s) from a webpage and generate appropriate test input suggestions in Persian (فارسی) or English depending on the field context.
+Analyze the following form field(s) from a webpage and generate appropriate test input suggestions in Persian (فارسی).
 
 Fields to analyze:
 {json.dumps(fields, ensure_ascii=False, indent=2)}
@@ -283,19 +425,12 @@ For EACH input field in the list above, output ONE JSON object in an array:
 Return ONLY a valid JSON array of objects with exactly {len(fields)} item(s). No explanations, no markdown comments."""
 
     try:
-        response = client_instance.chat.completions.create(
-            model=model,
-            messages=[{"role": "user", "content": prompt}],
-            temperature=0.2,
-            max_tokens=2000
-        )
-        raw_output = response.choices[0].message.content.strip()
+        raw_output = call_llm([{"role": "user", "content": prompt}], max_tokens=2000, temperature=0.2)
         parsed = clean_llm_json(raw_output)
 
         # Validate and align with DOM fields
         results = []
         for i, item in enumerate(parsed):
-            # Align with actual field to prevent hallucinated IDs
             target_field = fields[i] if i < len(fields) else fields[0]
             field_id = item.get('id') or target_field['id']
             field_name = item.get('name') or target_field['name']
@@ -329,6 +464,16 @@ Return ONLY a valid JSON array of objects with exactly {len(fields)} item(s). No
 # ==============================================================================
 # Flask Routes
 # ==============================================================================
+
+@app.route('/health', methods=['GET'])
+def health():
+    return jsonify({
+        'status': 'online',
+        'mode': selected_mode,
+        'model': active_model,
+        'run_id': RUN_ID
+    })
+
 
 @app.route('/snapshot', methods=['POST'])
 def snapshot():
@@ -372,7 +517,7 @@ def suggest_inputs():
         data = request.get_json(force=True)
         html = data.get('html', '')
 
-        # Save HTML for debugging
+        # Save HTML for session record
         html_file = os.path.join(RUN_SAVE_DIR, f'html_suggest_inputs_{run_time_temp}.html')
         with open(html_file, 'w', encoding='utf-8') as f:
             f.write(html)
@@ -388,7 +533,7 @@ def suggest_inputs():
             return jsonify([])
 
         # 2. Call LLM to generate suggestions
-        results = generate_field_suggestions(client, model_name, fields)
+        results = generate_field_suggestions(fields)
 
         # 3. Save JSON result
         result_file = os.path.join(RUN_SAVE_DIR, f'result_suggested_inputs_{run_time_temp}.json')
@@ -431,13 +576,8 @@ Return ONLY a JSON object:
   "bad_examples": ["bad1", "bad2", "bad3", "bad4", "bad5"]
 }}"""
 
-        res = client.chat.completions.create(
-            model=model_name,
-            messages=[{"role": "user", "content": prompt}],
-            temperature=0.3,
-            max_tokens=800
-        )
-        parsed = clean_llm_json(res.choices[0].message.content.strip())
+        raw_output = call_llm([{"role": "user", "content": prompt}], max_tokens=800, temperature=0.3)
+        parsed = clean_llm_json(raw_output)
         if isinstance(parsed, list) and parsed:
             parsed = parsed[0]
 
@@ -452,7 +592,6 @@ Return ONLY a JSON object:
             'new_bad_examples': new_bad
         }
 
-        # Save to session dir
         update_path = os.path.join(RUN_SAVE_DIR, f'input_suggestion_updates_{run_time_temp}_{field}.json')
         with open(update_path, 'w', encoding='utf-8') as f:
             json.dump(updates, f, ensure_ascii=False, indent=2)
@@ -517,7 +656,7 @@ def events():
 
         print(f"[+] Saved Katalon Recorder test to {katalon_path}")
 
-        # Launch the GUI improver in non-blocking thread (safely)
+        # Launch GUI improver safely
         try:
             show_katalon_improver(katalon_table, katalon_path, raw_events)
         except Exception as gui_err:
@@ -560,7 +699,6 @@ def convert_to_katalon_format(events):
         el_id = ev.get('id', '')
         ev_url = ev.get('url', '')
 
-        # Filter out extension events
         if ev_type in extension_events:
             continue
         if any(el_id.startswith(p) for p in extension_prefixes):
@@ -653,7 +791,6 @@ def convert_to_katalon_format(events):
             previous_time = curr_time
 
         elif ev_type in ('pageload', 'popstate', 'hashchange'):
-            # Only add open if URL differs from initial
             if url and url != initial_url:
                 katalon_commands.append({
                     'command': 'open',
@@ -698,7 +835,7 @@ def convert_to_katalon_format(events):
 
 
 # ==============================================================================
-# Katalon AI Improver GUI (Safe Thread Execution)
+# Katalon AI Improver GUI
 # ==============================================================================
 
 class KatalonTestImprover:
@@ -713,12 +850,10 @@ class KatalonTestImprover:
         self.root.title("Katalon Test Improver")
         self.root.geometry("1100x700")
 
-        # Close gracefully WITHOUT killing the server
         self.root.protocol("WM_DELETE_WINDOW", self.on_closing)
         self.setup_ui()
 
     def on_closing(self):
-        """Safely destroy GUI window without killing Flask server process"""
         try:
             self.root.destroy()
         except Exception:
@@ -792,15 +927,10 @@ class KatalonTestImprover:
 
         def query():
             try:
-                res = client.chat.completions.create(
-                    model=model_name,
-                    messages=[
-                        {"role": "system", "content": "You are a QA automation assistant."},
-                        {"role": "user", "content": f"Test script:\n{self.extract_table_content(self.current_katalon)}\n\nQuestion: {user_msg}"}
-                    ],
-                    max_tokens=600
-                )
-                answer = res.choices[0].message.content.strip()
+                answer = call_llm([
+                    {"role": "system", "content": "You are a QA automation assistant."},
+                    {"role": "user", "content": f"Test script:\n{self.extract_table_content(self.current_katalon)}\n\nQuestion: {user_msg}"}
+                ], max_tokens=600)
                 self.root.after(0, lambda: self.chat_display.insert(tk.END, f"\nAI: {answer}\n"))
             except Exception as e:
                 self.root.after(0, lambda: self.chat_display.insert(tk.END, f"\nError: {e}\n"))
@@ -863,19 +993,15 @@ def generate_test_cases_endpoint():
         # Collect examples for each field
         field_examples = {}
         for f_name, default_val in type_fields.items():
-            # Check if confirmed
             if f_name in CONFIRMED_FIELDS and CONFIRMED_FIELDS[f_name].get('examples'):
                 field_examples[f_name] = CONFIRMED_FIELDS[f_name]['examples']
             else:
-                # Generate variations
                 field_examples[f_name] = [f"{default_val}_{i+1}" if default_val else f"test_{i+1}" for i in range(5)]
 
-        # Combinations
         headers = list(field_examples.keys())
         example_lists = [field_examples[h] for h in headers]
         all_combos = list(product(*example_lists))
 
-        # Limit to num_test_cases
         selected_combos = all_combos[:num_test_cases]
 
         with open(output_csv_path, 'w', newline='', encoding='utf-8') as csv_file:
@@ -904,13 +1030,13 @@ def shutdown():
 
 
 if __name__ == '__main__':
-    if not check_port_available(port):
-        print(f"[!] Error: Port {port} is already in use!")
+    if not check_port_available(server_port):
+        print(f"[!] Error: Port {server_port} is already in use!")
         sys.exit(1)
 
-    print(f"\n[+] Server listening on http://localhost:{port}")
+    print(f"\n[+] Server listening on http://localhost:{server_port}")
     print("[+] Ready for Chrome Extension requests.\n")
     try:
-        app.run(host='127.0.0.1', port=port, debug=False)
+        app.run(host='127.0.0.1', port=server_port, debug=False)
     except KeyboardInterrupt:
         print("\n[*] Server stopped by user.")

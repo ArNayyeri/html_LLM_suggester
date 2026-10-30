@@ -229,8 +229,16 @@
       `;
 
       function positionButton() {
-        if (!el || !document.contains(el)) return;
+        if (!el || !document.contains(el)) {
+          btn.remove();
+          return;
+        }
         const rect = el.getBoundingClientRect();
+        if (rect.width === 0 || rect.height === 0 || window.getComputedStyle(el).display === 'none') {
+          btn.style.display = 'none';
+          return;
+        }
+        btn.style.display = 'inline-flex';
         const top = rect.top + window.pageYOffset + Math.max(0, (rect.height - 24) / 2);
         const left = rect.right + window.pageXOffset + 6;
         btn.style.top = `${top}px`;

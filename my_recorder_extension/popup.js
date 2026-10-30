@@ -1,8 +1,31 @@
+function checkServerHealth() {
+  const statusEl = document.getElementById('server-status');
+  const textEl = document.getElementById('server-text');
+
+  fetch('http://localhost:5000/health', { method: 'GET', signal: AbortSignal.timeout(2000) })
+    .then(res => res.json())
+    .then(data => {
+      if (statusEl && textEl) {
+        statusEl.className = 'server-status server-online';
+        textEl.textContent = data.model || 'Online';
+        textEl.title = `Mode: ${data.mode} | Model: ${data.model}`;
+      }
+    })
+    .catch(() => {
+      if (statusEl && textEl) {
+        statusEl.className = 'server-status server-offline';
+        textEl.textContent = 'Offline';
+        textEl.title = 'Python server is not running on port 5000';
+      }
+    });
+}
+
 function updateCount() {
   chrome.storage.local.get({ recordedEvents: [] }, function (result) {
     const el = document.getElementById('count');
     if (el) {
-      el.textContent = 'Events recorded: ' + (result.recordedEvents ? result.recordedEvents.length : 0);
+      const len = result.recordedEvents ? result.recordedEvents.length : 0;
+      el.textContent = `Events recorded: ${len}`;
     }
   });
 }
@@ -11,9 +34,13 @@ function updateToggleButton() {
   chrome.storage.local.get({ isRecording: false }, function (result) {
     const btn = document.getElementById('toggle-recording');
     if (btn) {
-      btn.textContent = result.isRecording ? 'Stop Recording' : 'Start Recording';
-      btn.style.backgroundColor = result.isRecording ? '#dc3545' : '#28a745';
-      btn.style.color = '#fff';
+      if (result.isRecording) {
+        btn.textContent = '⏹ Stop Recording';
+        btn.className = 'btn btn-record-stop';
+      } else {
+        btn.textContent = '⏺ Start Recording';
+        btn.className = 'btn btn-record-start';
+      }
     }
   });
 }
@@ -24,8 +51,7 @@ document.getElementById('toggle-recording').onclick = function () {
     const newRecording = !wasRecording;
 
     if (newRecording) {
-      // STARTING NEW RECORDING SESSION
-      // 1. Get active tab to record initial page URL
+      // STARTING RECORDING
       chrome.tabs.query({ active: true, currentWindow: true }, function (tabs) {
         const activeTab = tabs && tabs[0] ? tabs[0] : null;
         const initialEvents = [];
@@ -38,7 +64,6 @@ document.getElementById('toggle-recording').onclick = function () {
           });
         }
 
-        // 2. Clear old session events and set recording active
         chrome.storage.local.set({
           isRecording: true,
           recordedEvents: initialEvents,
@@ -49,21 +74,20 @@ document.getElementById('toggle-recording').onclick = function () {
         });
       });
     } else {
-      // STOPPING RECORDING SESSION
+      // STOPPING RECORDING
       chrome.storage.local.set({ isRecording: false }, function () {
         updateToggleButton();
 
-        // Send recorded events to Python backend
         const eventsToSend = result.recordedEvents || [];
         fetch('http://localhost:5000/events', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ events: eventsToSend })
         }).then(res => res.json())
-          .then(data => {
+          .then(() => {
             chrome.storage.local.set({ serverError: false });
             updateCount();
-            alert(`Recording finished! Saved ${eventsToSend.length} events to server and generated Katalon test.`);
+            alert(`Recording finished!\nSaved ${eventsToSend.length} events and generated Katalon test.`);
           }).catch(error => {
             console.error('Failed to send events:', error);
             chrome.storage.local.set({ serverError: true });
@@ -77,7 +101,7 @@ document.getElementById('toggle-recording').onclick = function () {
 
 document.getElementById('download').onclick = function () {
   chrome.storage.local.get({ recordedEvents: [] }, function (result) {
-    const data = JSON.stringify(result.recordedEvents, null, 2);
+    const data = JSON.stringify(result.recordedEvents || [], null, 2);
     const url = URL.createObjectURL(new Blob([data], { type: 'application/json' }));
     const a = document.createElement('a');
     a.href = url;
@@ -91,26 +115,25 @@ document.getElementById('clear').onclick = function () {
   chrome.storage.local.set({ recordedEvents: [] }, updateCount);
 };
 
-// Suggest input values
 const suggestBtn = document.getElementById('suggest-inputs');
 suggestBtn.onclick = function () {
   const suggestionStartTime = Date.now();
 
   suggestBtn.disabled = true;
-  suggestBtn.textContent = 'Processing with AI...';
+  suggestBtn.textContent = '⏳ Processing with AI...';
 
   chrome.runtime.sendMessage({
     type: 'requestSuggestions',
     startTime: suggestionStartTime
   }, function(response) {
     suggestBtn.disabled = false;
-    suggestBtn.textContent = 'Suggest Input Values';
+    suggestBtn.textContent = '✨ Suggest Inputs (AI)';
 
     if (response && response.error) {
       alert('Error: ' + response.error);
     } else if (response && response.success) {
       const count = response.suggestions ? response.suggestions.length : 0;
-      alert(`Success! Generated suggestions for ${count} field(s). Look for the blue '?' buttons next to input fields on the page.`);
+      alert(`Success! Generated suggestions for ${count} field(s).\nLook for the blue '?' buttons next to input fields on the page.`);
     } else {
       alert('Request completed. Check the webpage for suggestions.');
     }
@@ -120,3 +143,4 @@ suggestBtn.onclick = function () {
 
 updateCount();
 updateToggleButton();
+checkServerHealth();

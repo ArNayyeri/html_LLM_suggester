@@ -1,10 +1,6 @@
-flask
-flask-cors
-pydantic
-bs4
-openai
-ollama
-tiktoken
-deep-translator
-beautifulsoup4
-requests
+flask>=3.0.0
+flask-cors>=4.0.0
+beautifulsoup4>=4.12.0
+openai>=1.12.0
+requests>=2.31.0
+pydantic>=2.0.0

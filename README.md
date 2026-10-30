@@ -1,266 +1,168 @@
-# html_LLM_suggester
+# Katalon AI Web Recorder & Form Input Suggester
 
-A smart web form analyzer and input suggester using LLMs (Large Language Models).
+A smart web form analyzer, input suggester, and test recorder designed for **Katalon Studio / Katalon Recorder**, powered by Large Language Models (GPU servers, OpenRouter free models, or local Ollama).
 
-## Overview
-This project provides a Flask-based backend server and a browser extension to:
-- Record HTML/CSS snapshots and user events from web pages.
-- Analyze web forms using LLMs (Ollama or OpenRouter/Cerebras).
-- Suggest valid input values and ranges for form fields, in Persian, based on the HTML structure.
-- Generate Katalon Studio test scripts from recorded user interactions.
-- Create comprehensive test case combinations from confirmed field data.
-- Provide AI-powered test improvement through an interactive GUI.
+---
 
-## Features
-- **Form Field Extraction:** Automatically detects `<input>`, `<textarea>`, and `<select>` fields from HTML
-- **LLM-Powered Suggestions:** Uses LLMs to infer field types, validation rules, and generate realistic test values
-- **Multi-language Support:** Provides suggestions in Persian with English processing capabilities
-- **Snapshot Recording:** Captures page HTML, CSS, and user events for reproducible testing
-- **Katalon Test Generation:** Converts recorded user events into Katalon Studio test scripts with smart wait times
-- **AI-Powered Test Improvement GUI:** Interactive interface for improving generated Katalon tests using LLM assistance
-- **Test Case Generation:** Creates combinatorial test cases from confirmed field suggestions and exports to CSV
-- **Chat History:** Maintains conversation context for better AI interactions when improving tests
-- **Port Availability Check:** Automatically checks if the server port is available before starting
-- **Graceful Shutdown:** Proper application cleanup and shutdown handling
-- **Smart Timing Calculation:** Excludes browser extension processing time from Katalon test wait commands
-- **Confirmation System:** Allows users to confirm and save field suggestions for better test generation
+## 🌟 Key Features
 
-## API Endpoints
-- `POST /snapshot` — Save HTML, CSS, and event data snapshots
-- `POST /events` — Save user events, generate Katalon test scripts, and launch AI improvement GUI
-- `POST /suggest_inputs` — Analyze HTML and return input suggestions as JSON
-- `POST /update_input_suggestion` — Update field suggestions and get new LLM-generated examples
-- `POST /confirm_suggestion` — Confirm and save field suggestions from users
-- `POST /generate_test_cases` — Generate combinatorial test cases from Katalon files and confirmation data
-- `POST /shutdown` — Gracefully shutdown the Flask server
+- **Automated Form Field Extraction:** Detects all interactive `<input>`, `<textarea>`, and `<select>` elements, associating labels, placeholders, and validation constraints without overwhelming LLMs with raw HTML.
+- **Multi-Backend LLM Support:**
+  - **Remote GPU Server:** Connects to any remote Ollama/OpenAI-compatible GPU endpoint (e.g., `185.239.2.48:11434`) with dynamic IP/host selection.
+  - **OpenRouter Free Tier with Auto-Failover:** Automatically handles upstream rate limits (`429`) and timeouts (`503/504`) by gracefully falling back across top free models (`gemma-4`, `nemotron-3.5-lightning`, `liquid-lfm`).
+  - **Local Ollama:** Fully offline execution on `localhost:11434`.
+- **In-Page Interactive Suggestion Modal:** Click the blue `?` button next to any field on the webpage to review, edit, regenerate with AI, or confirm test suggestions directly inside the page.
+- **Katalon Test Script Generation:** Converts recorded browser interactions into valid, well-structured Katalon Studio test tables (with guaranteed initial `open` command and user-like pause times).
+- **Combinatorial Test Case Matrix (CSV Export):** Generates pairwise/combinatorial test cases from confirmed user inputs and AI edge cases, ready for import into Katalon or other test automation suites.
+- **Interactive AI Test Improver GUI:** Built-in Tkinter interface to review, edit, and optimize generated Katalon tests using an interactive AI assistant.
+- **Extension Live Health Check:** Popup automatically checks whether the Python backend is running and displays the active model name.
 
-## Getting Started
+---
 
-### Prerequisites
-- Python 3.8+
-- [Ollama](https://ollama.com/) (for local LLM) or an OpenRouter/Cerebras  API key
-- Node.js (for browser extension development, optional)
+## 🚀 Quick Start with `uv` (Recommended)
 
-### Installation
-You can use **either** of the following methods:
+[`uv`](https://github.com/astral-sh/uv) provides instant virtual environment creation and package resolution:
 
-#### 1. Clone and Run the Python Code
-1. **Clone the repository:**
-   ```sh
-   git clone https://github.com/ArNayyeri/html_LLM_suggester.git
-   cd html_LLM_suggester
-   ```
+```bash
+# 1. Clone repository
+git clone https://github.com/ArNayyeri/html_LLM_suggester.git
+cd html_LLM_suggester
 
-2. **Install Python dependencies:**
-   ```sh
-   pip install -r requirements.txt
-   ```
-   Key dependencies include:
-   - `flask`, `flask-cors` — Web server framework
-   - `pydantic`, `bs4`, `beautifulsoup4` — Data parsing and validation
-   - `openai`, `ollama` — LLM integration
-   - `tiktoken` — Token counting for LLMs
-   - `deep-translator` — Translation services
-   - `tkinter` — GUI framework (built-in)
-   - `threading`, `webbrowser` — System utilities (built-in)
-   - `csv`, `math`, `itertools` — Data processing (built-in)
-   - `socket`, `urllib.parse` — Network utilities (built-in)
+# 2. Create virtual environment and install dependencies
+uv venv
+uv pip install -e .
 
-3. **(Optional) Set up Ollama or get an OpenRouter/Cerebras API key.**
-
-4. **Run the server:**
-   ```sh
-   python recorder_server.py
-   ```
-   You will be prompted to choose between local (Ollama) or API (OpenRouter/Cerebras).
-
-#### 2. Use the Latest Release
-- Download the latest pre-built release from the [Releases page](https://github.com/ArNayyeri/html_LLM_suggester/releases) of this repository.
-- Extract and run the executable or provided files as described in the release notes.
-
-### Using the Browser Extension
-- See the `my_recorder_extension/` folder for a Chrome extension to record page data.
-- Load it in Chrome via `chrome://extensions` > "Load unpacked".
-
-## Typical Workflow
-
-1. **Start the Server:**
-   ```bash
-   python recorder_server.py
-   # Choose 'local' for Ollama or 'api' for OpenRouter/Cerebras
-   ```
-
-2. **Record User Actions:**
-   - Install the browser extension
-   - Navigate to your target website
-   - Perform actions (clicking, typing, submitting forms)
-   - Events are automatically recorded and snapshots are saved
-
-3. **Get Field Suggestions:**
-   - The extension analyzes forms and gets LLM suggestions in Persian
-   - Review and confirm suggestions through the extension popup
-   - Confirmed suggestions are saved for later use in test generation
-
-4. **Generate Katalon Tests:**
-   - Recorded events are converted to Katalon test format with smart timing
-   - AI improvement GUI opens automatically for test enhancement
-   - Interactive chat interface allows for test optimization
-
-5. **Create Test Cases:**
-   - Generate combinatorial test cases from confirmed field data
-   - Export to CSV for use in testing frameworks
-   - Uses both confirmed user data and LLM-generated examples
-
-## Katalon Test Generation
-
-This tool automatically converts recorded user events into Katalon Studio test scripts with the following features:
-
-### Key Features
-- **Smart Wait Time Calculation:** Adds realistic wait times between actions based on actual user timing, excluding browser extension processing time
-- **Event Type Mapping:** Converts various user events (clicks, input changes, form submissions) into appropriate Katalon commands
-- **Extension Event Filtering:** Automatically excludes extension-specific events from test generation
-- **AI-Powered Improvement:** After generating tests, an interactive GUI opens for LLM-assisted test optimization
-
-### Generated Test Structure
-The tool creates Katalon test scripts with:
-- `pause` statements for realistic timing between actions
-- `click` for user interactions
-- `type` for input field interactions  
-- `submit` for form submissions
-- `open` for page navigation
-- Proper element selectors based on recorded events (prioritizes id > css > xpath)
-
-### AI Test Improvement GUI
-After the `/events` endpoint processes user events, an interactive GUI automatically opens featuring:
-
-#### Two-Tab Interface:
-1. **Current Test Tab:**
-   - Displays the generated Katalon test script in readable format
-   - Allows manual editing and saving
-   - Shows test commands in a scrollable text area
-   - Buttons for saving, regenerating, and opening in browser
-
-2. **AI Assistant Tab:**
-   - Interactive chat interface with LLM
-   - Contextual understanding of your test with maintained chat history
-   - Supports both local (Ollama) and API (OpenRouter/Cerebras) services
-   - Real-time conversation for test improvement
-
-#### Available Actions:
-- **Send Message:** Ask specific questions about test improvement
-- **Apply AI Suggestions:** Let AI automatically improve the test based on conversation
-- **Get New Suggestions:** Request fresh analysis and suggestions
-- **Clear History:** Reset the conversation context
-- **Save Current Test:** Save the improved test to file
-- **Regenerate Test:** Recreate test from original events
-- **Open in Browser:** View the test in browser format
-
-#### Usage Tips:
-- Ask specific questions like "How can I make this test more robust?"
-- Request additions like "Add assertions to verify the form submission was successful"
-- Get help with "What validations should I add to this test?"
-- The AI maintains context throughout the conversation for better suggestions
-
-## Test Case Generation from Katalon Tests
-
-After generating Katalon tests, you can automatically create comprehensive test case combinations:
-
-### Features
-- **Smart Field Analysis:** Extracts input fields from Katalon test scripts
-- **Confirmation Integration:** Uses user-confirmed field suggestions when available from `/confirm_suggestion` endpoint
-- **Combinatorial Test Generation:** Creates all possible combinations of field examples
-- **LLM-Enhanced Examples:** Generates additional examples when confirmations are insufficient
-- **CSV Export:** Saves test cases in CSV format for easy import into testing tools
-- **Intelligent Field Matching:** Matches Katalon fields with confirmation data using flexible identification
-
-### API Endpoint
-- `POST /generate_test_cases` — Generate test case combinations from Katalon files
-
-### Usage
-The system automatically looks for confirmation files (from `/confirm_suggestion` endpoint) to use validated field examples. If no confirmations are found, it generates examples using LLM analysis based on field types and original values.
-
-Example generated CSV:
-```csv
-username,password,email
-user1,pass123,test1@example.com
-user2,pass456,test2@example.com
-admin,admin123,admin@company.com
-testuser,testpass123,testuser@domain.com
+# 3. Start the server
+uv run python recorder_server.py
 ```
 
-## Example Output
+### Alternative: Standard `pip`
 
-### Input Suggestions
-A typical response from `/suggest_inputs`:
-```json
-[
-  {
-    "name": "نام پروژه",
-    "id": "input-209", 
-    "type": "text",
-    "range": "حداکثر 255 کاراکتر",
-    "examples": [
-      "پروژه نمونه 1",
-      "پروژه نمونه 2",
-      "پروژه تست",
-      "سامانه مدیریت",
-      "برنامه کاربردی"
-    ]
-  }
-]
+```bash
+python -m venv .venv
+# Windows:
+.venv\Scripts\activate
+# Linux/macOS:
+source .venv/bin/activate
+
+pip install -r requirements.txt
+python recorder_server.py
 ```
 
-### Generated Katalon Test
-Example of a generated Katalon test script from recorded events:
+---
 
-| Command | Target | Value |
-|---------|--------|-------|
-| open | https://example.com/form | |
-| pause | 2000 | Wait 2.0s |
-| click | id=username | |
-| pause | 1000 | Wait 1.0s |
-| type | id=username | john_doe |
-| pause | 3000 | Wait 3.0s |
-| click | id=submit-btn | |
-| pause | 2000 | Wait 2.0s |
-| submit | id=main-form | |
+## ⚙️ Configuration & Backend Selection
 
-## Folder Structure
-- `recorder_server.py` — Main Flask backend with all functionality
-- `my_recorder_extension/` — Chrome extension for recording web page data
-- `snapshots/` — Saved data organized by recording sessions
-  - `run_[timestamp]_[uid]/` — Individual recording sessions
-    - `recorded_events.json` — User interaction events
-    - `katalon_test.html` — Generated Katalon test script
-    - `[event]_[timestamp].html` — Page snapshots
-    - `[event]_[timestamp].css` — Page stylesheets  
-    - `confirmation_[timestamp]_[field]_[url].json` — User-confirmed field suggestions
-    - `result_suggested_inputs_[timestamp].json` — LLM-generated suggestions
-    - `input_suggestion_updates_[timestamp]_[field].json` — Updated field suggestions
-    - `temp_katalon_test.html` — Temporary test files for browser viewing
+When starting `recorder_server.py`, an interactive menu lets you choose your LLM provider:
 
-## Advanced Features
+```text
+================================================================
+   HTML LLM Suggester & Katalon Recorder Server
+================================================================
+Select LLM Backend:
+  1) GPU Remote Server   [Default host: 185.239.2.48:11434]
+  2) OpenRouter Free API (with automatic failover across free models)
+  3) Local Ollama        [http://localhost:11434/v1]
+Enter choice (1/2/3, default=1): 
+```
 
-### Token Management
-- Automatic token counting using tiktoken for LLM optimization
-- Context truncation for large HTML documents while preserving target elements
-- Smart content selection to stay within model token limits
+### Tokens File (`tokens`)
 
-### Multi-language Processing
-- Persian-to-English translation for LLM processing
-- English-to-Persian translation for user-facing content
-- Maintains cultural context in generated examples
+You can create or edit a file named `tokens` in the project root to store credentials automatically (it is already included in `.gitignore`):
 
-### Error Handling & Recovery
-- Graceful degradation when translation services fail
-- Fallback example generation when LLM calls fail
-- Port availability checking before server startup
-- Comprehensive error logging and user feedback
+```text
+# Line 1: OpenRouter API Token
+sk-or-v1-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+# Line 2: GPU Server Token
+sk-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+# Line 3 (optional): GPU Host / IP (default: 185.239.2.48)
+185.239.2.48
+# Line 4 (optional): GPU Port (default: 11434)
+11434
+```
 
-## Acknowledgements
-- [Ollama](https://ollama.com/)
-- [OpenRouter](https://openrouter.ai/)
-- [Cerebras](https://www.cerebras.ai/)
-- [OpenAI Python SDK](https://github.com/openai/openai-python)
-- [Deep Translator](https://github.com/nidhaloff/deep-translator)
-- [Beautiful Soup](https://www.crummy.com/software/BeautifulSoup/)
+*Key-value syntax is also supported (e.g., `OPENROUTER_TOKEN=...`, `GPU_HOST=...`).*
+
+### Command-Line Arguments
+
+The server also supports headless/scripted execution with flags:
+
+```bash
+# Run with GPU backend:
+python recorder_server.py --mode gpu --gpu-host 185.239.2.48 --gpu-port 11434 --model gemma4:e4b
+
+# Run with OpenRouter free models:
+python recorder_server.py --mode openrouter --token sk-or-v1-...
+
+# Run with local Ollama:
+python recorder_server.py --mode local --model Llama3.2:3b
+```
+
+---
+
+## 🧩 Browser Extension Setup
+
+1. Open Google Chrome and navigate to `chrome://extensions`.
+2. Enable **Developer mode** (toggle in top right).
+3. Click **Load unpacked** and select the `my_recorder_extension/` directory.
+4. Pin the extension to your toolbar.
+
+### Workflow:
+
+1. **Start Server:** Ensure `python recorder_server.py` is running on port 5000.
+2. **Suggest Inputs:**
+   - Navigate to any target website (e.g. login, registration, or Google).
+   - Click the extension icon and click **✨ Suggest Inputs (AI)**.
+   - Blue `?` buttons will appear next to form fields. Click any `?` button to view AI suggestions, modify validation rules, or click **Confirm & Save**.
+3. **Record Actions:**
+   - Click **⏺ Start Recording** in the extension popup.
+   - Interact with the page (typing, clicking, submitting).
+   - Click **⏹ Stop Recording**.
+4. **Inspect Generated Test & Combinations:**
+   - The Katalon test is automatically saved in `snapshots/run_<id>/katalon_test.html`.
+   - The AI Improver GUI will open to assist in refining your test script.
+
+---
+
+## 📡 API Endpoints Reference
+
+| Method | Endpoint | Description |
+|---|---|---|
+| `GET` | `/health` | Returns server status, mode, active model, and session ID |
+| `POST` | `/suggest_inputs` | Extracts form fields from HTML and returns LLM test data suggestions |
+| `POST` | `/update_input_suggestion` | Regenerates field suggestions based on updated constraints |
+| `POST` | `/confirm_suggestion` | Confirms and persists user-validated field rules |
+| `POST` | `/events` | Saves interaction events, generates Katalon script, opens improver GUI |
+| `POST` | `/generate_test_cases` | Generates combinatorial test case matrix and exports to CSV |
+| `POST` | `/snapshot` | Saves raw page HTML/CSS snapshots |
+| `POST` | `/shutdown` | Gracefully terminates server |
+
+---
+
+## 📂 Project Structure
+
+```text
+html_LLM_suggester/
+├── recorder_server.py         # Main Flask server & LLM integration
+├── pyproject.toml             # uv / PEP 621 project configuration
+├── requirements.txt           # Standard pip dependencies
+├── tokens                     # Local API tokens and GPU config (git-ignored)
+├── my_recorder_extension/     # Chrome Extension (Manifest V3)
+│   ├── manifest.json          # Extension metadata and permissions
+│   ├── background.js          # Service worker for context menus & sync
+│   ├── content.js             # Event recorder and in-page modal UI
+│   ├── popup.html             # Extension popup interface
+│   ├── popup.js               # Extension popup logic & health check
+│   └── icons/                 # 16x16, 48x48, 128x128 icons
+└── snapshots/                 # Test recording sessions and output files
+    └── run_<timestamp>_<id>/
+        ├── recorded_events.json
+        ├── katalon_test.html
+        └── generated_test_cases.csv
+```
+
+---
+
+## 📄 License
+
+This project is licensed under the [MIT License](LICENSE).

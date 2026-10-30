@@ -1,20 +1,167 @@
 <!DOCTYPE html>
-<html>
-  <head>
-    <title>Recorder</title>
-    <style>
-      body { font-family: Arial, sans-serif; margin: 10px; }
-      button { margin-top: 10px; }
-    </style>
-  </head>
-  <body>
-    <h3>Recorded Events</h3>
-    <button id="toggle-recording">Start Recording</button>
-    <button id="download">Download JSON</button>
-    <button id="clear">Clear Events</button>
-    <button id="suggest-inputs">Suggest Input Values</button>
-    <pre id="count"></pre>
-    <script src="jszip.min.js"></script>
-    <script src="popup.js"></script>
-  </body>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>AI Web Recorder</title>
+  <style>
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      width: 290px;
+      padding: 14px;
+      background: #f8f9fa;
+      color: #212529;
+    }
+    .header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 12px;
+      padding-bottom: 10px;
+      border-bottom: 1px solid #e9ecef;
+    }
+    .title {
+      font-size: 15px;
+      font-weight: 700;
+      color: #0d6efd;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .server-status {
+      font-size: 11px;
+      padding: 2px 7px;
+      border-radius: 10px;
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      font-weight: 500;
+    }
+    .server-online {
+      background: #e8f5e9;
+      color: #2e7d32;
+    }
+    .server-offline {
+      background: #ffebee;
+      color: #c62828;
+    }
+    .status-dot {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      display: inline-block;
+    }
+    .server-online .status-dot {
+      background: #4caf50;
+    }
+    .server-offline .status-dot {
+      background: #f44336;
+    }
+    .btn {
+      width: 100%;
+      padding: 9px 12px;
+      margin-bottom: 8px;
+      border-radius: 6px;
+      border: none;
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      transition: all 0.15s ease;
+    }
+    .btn:active {
+      transform: scale(0.98);
+    }
+    .btn:disabled {
+      opacity: 0.65;
+      cursor: not-allowed;
+    }
+    .btn-record-start {
+      background: #198754;
+      color: #ffffff;
+    }
+    .btn-record-start:hover {
+      background: #157347;
+    }
+    .btn-record-stop {
+      background: #dc3545;
+      color: #ffffff;
+      animation: pulse 1.5s infinite;
+    }
+    @keyframes pulse {
+      0% { opacity: 1; }
+      50% { opacity: 0.85; }
+      100% { opacity: 1; }
+    }
+    .btn-ai {
+      background: #0d6efd;
+      color: #ffffff;
+    }
+    .btn-ai:hover {
+      background: #0b5ed7;
+    }
+    .btn-row {
+      display: flex;
+      gap: 8px;
+      margin-bottom: 8px;
+    }
+    .btn-row .btn {
+      margin-bottom: 0;
+      font-size: 12px;
+      padding: 7px 10px;
+    }
+    .btn-secondary {
+      background: #e9ecef;
+      color: #495057;
+    }
+    .btn-secondary:hover {
+      background: #dee2e6;
+    }
+    .count-box {
+      background: #ffffff;
+      border: 1px solid #dee2e6;
+      border-radius: 6px;
+      padding: 8px 10px;
+      font-size: 12px;
+      color: #6c757d;
+      text-align: center;
+      font-family: monospace;
+    }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <div class="title">
+      <span>AI Recorder</span>
+    </div>
+    <div id="server-status" class="server-status server-offline">
+      <span class="status-dot"></span>
+      <span id="server-text">Offline</span>
+    </div>
+  </div>
+
+  <button id="toggle-recording" class="btn btn-record-start">
+    ⏺ Start Recording
+  </button>
+
+  <button id="suggest-inputs" class="btn btn-ai">
+    ✨ Suggest Inputs (AI)
+  </button>
+
+  <div class="btn-row">
+    <button id="download" class="btn btn-secondary">💾 Save JSON</button>
+    <button id="clear" class="btn btn-secondary">🗑 Clear</button>
+  </div>
+
+  <div id="count" class="count-box">Events recorded: 0</div>
+
+  <script src="popup.js"></script>
+</body>
 </html>

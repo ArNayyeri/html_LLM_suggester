@@ -39,10 +39,10 @@ DEFAULT_LOCAL_MODEL = "Llama3.2:3b"
 
 DEFAULT_OPENROUTER_URL = "https://openrouter.ai/api/v1"
 OPENROUTER_FREE_MODELS = [
-    "google/gemma-4-26b-a4b-it:free",
+    "liquid/lfm-2.5-2.6b:free",
     "nvidia/nemotron-3.5-lightning:free",
     "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free",
-    "liquid/lfm-2.5-2.6b:free",
+    "google/gemma-4-26b-a4b-it:free",
     "google/gemma-4-31b-it:free"
 ]
 

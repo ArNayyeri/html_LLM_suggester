@@ -15,6 +15,7 @@ A smart web form analyzer, input suggester, and test recorder designed for **Kat
 - **Katalon Test Script Generation:** Converts recorded browser interactions into valid, well-structured Katalon Studio test tables (with guaranteed initial `open` command and user-like pause times).
 - **Combinatorial Test Case Matrix (CSV Export):** Generates pairwise/combinatorial test cases from confirmed user inputs and AI edge cases, ready for import into Katalon or other test automation suites.
 - **Interactive AI Test Improver GUI:** Built-in Tkinter interface to review, edit, and optimize generated Katalon tests using an interactive AI assistant.
+- **Playwright Interactive Recording:** Launch a persistent Chromium session with the extension pre-loaded and use the Playwright Inspector / Code Generator while keeping the AI form suggester active.
 - **Extension Live Health Check:** Popup automatically checks whether the Python backend is running and displays the active model name.
 
 ---
@@ -31,6 +32,7 @@ cd html_LLM_suggester
 # 2. Create virtual environment and install dependencies
 uv venv
 uv pip install -e .
+uv run playwright install chromium
 
 # 3. Start the server
 uv run python recorder_server.py
@@ -46,6 +48,7 @@ python -m venv .venv
 source .venv/bin/activate
 
 pip install -r requirements.txt
+playwright install chromium
 python recorder_server.py
 ```
 
@@ -123,6 +126,32 @@ python recorder_server.py --mode local --model Llama3.2:3b
 
 ---
 
+## 🎭 Playwright Interactive Recording
+
+You can record Playwright tests with the extension pre-loaded into Chromium. Playwright requires a persistent browser context to load unpacked extensions.
+
+### Run Recorder:
+
+```bash
+# Start the backend server in one terminal:
+uv run python recorder_server.py
+
+# In another terminal, launch the Playwright recorder:
+uv run python playwright_recorder.py https://example.com
+# Or via entry point:
+uv run playwright-recorder https://example.com
+```
+
+### What Happens:
+1. **Chromium Opens:** Launches with `my_recorder_extension` automatically loaded from the project directory.
+2. **Playwright Inspector Opens:** Activates the Playwright code generator in recording mode.
+3. **Simultaneous Workflows:**
+   - **Playwright script:** Every click, type, and navigation action is recorded into Playwright code in the inspector.
+   - **AI Form Suggestions:** Click the extension icon in the toolbar or click **✨ Suggest Inputs (AI)** to inspect form fields and insert test values.
+   - **Katalon / Combinatorial output:** You can also hit **⏺ Start Recording** in the extension popup to generate Katalon test cases concurrently.
+
+---
+
 ## 📡 API Endpoints Reference
 
 | Method | Endpoint | Description |
@@ -143,6 +172,7 @@ python recorder_server.py --mode local --model Llama3.2:3b
 ```text
 html_LLM_suggester/
 ├── recorder_server.py         # Main Flask server & LLM integration
+├── playwright_recorder.py     # Playwright launcher & inspector recorder with extension
 ├── pyproject.toml             # uv / PEP 621 project configuration
 ├── requirements.txt           # Standard pip dependencies
 ├── tokens                     # Local API tokens and GPU config (git-ignored)

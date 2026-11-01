@@ -27,6 +27,8 @@ dependencies = [
     "openai>=1.12.0",
     "beautifulsoup4>=4.12.0",
     "requests>=2.31.0",
+    "pydantic>=2.0.0",
+    "playwright>=1.60.0",
 ]
 
 [project.optional-dependencies]
@@ -36,8 +38,10 @@ dev = [
 
 [project.scripts]
 recorder-server = "recorder_server:app.run"
+playwright-recorder = "playwright_recorder:main"
 
 [tool.hatch.build.targets.wheel]
 include = [
     "recorder_server.py",
+    "playwright_recorder.py",
 ]

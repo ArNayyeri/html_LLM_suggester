@@ -674,6 +674,14 @@ def events():
 
         print(f"[+] Saved Katalon Recorder test to {katalon_path}")
 
+        # Convert to Playwright format
+        playwright_code = convert_to_playwright_format(raw_events)
+        playwright_path = os.path.join(RUN_SAVE_DIR, 'playwright_test.py')
+        with open(playwright_path, 'w', encoding='utf-8') as f:
+            f.write(playwright_code)
+
+        print(f"[+] Saved Playwright test script to {playwright_path}")
+
         # Launch GUI improver safely
         try:
             show_katalon_improver(katalon_table, katalon_path, raw_events)
@@ -850,6 +858,150 @@ def convert_to_katalon_format(events):
 </html>"""
 
     return html_content
+
+
+# ==============================================================================
+# Playwright Test Conversion
+# ==============================================================================
+
+def convert_to_playwright_format(events):
+    """
+    Convert recorded interaction events to an executable Playwright Python test script.
+    Saves automatically to snapshots/run_<id>/playwright_test.py
+    """
+    extension_events = {
+        'suggest_inputs_start', 'suggest_inputs_complete',
+        'suggestion_question_mark_click', 'suggestion_modal_open',
+        'suggestion_modal_cancel', 'suggestion_modal_confirm',
+        'suggestion_modal_submit_start', 'suggestion_modal_submit_success',
+        'suggestion_modal_submit_failure'
+    }
+
+    extension_prefixes = (
+        'edit-range', 'edit-examples', 'edit-bad-examples',
+        'edit-cancel', 'edit-confirm', 'edit-submit',
+        'input-suggestion-modal', 'suggest-inputs', 'llm-suggestion'
+    )
+
+    valid_events = []
+    initial_url = "https://www.google.com/"
+
+    for ev in events:
+        ev_type = ev.get('type', '')
+        el_id = ev.get('id', '')
+        ev_url = ev.get('url', '')
+
+        if ev_type in extension_events:
+            continue
+        if any(el_id.startswith(p) for p in extension_prefixes):
+            continue
+        if ev_url and ev_url.startswith('chrome-extension://'):
+            continue
+
+        if ev_url and not initial_url:
+            initial_url = ev_url
+
+        valid_events.append(ev)
+
+    if valid_events and valid_events[0].get('url'):
+        initial_url = valid_events[0]['url']
+
+    actions = []
+    previous_time = valid_events[0].get('time') if valid_events else None
+
+    for ev in valid_events:
+        ev_type = ev.get('type', '')
+        tag = ev.get('tag', '').lower()
+        el_id = ev.get('id', '')
+        name = ev.get('name', '')
+        xpath = ev.get('xpath', '')
+        value = ev.get('value', '')
+        url = ev.get('url', '')
+        curr_time = ev.get('time')
+
+        # Add pause if significant time gap
+        if previous_time and curr_time:
+            time_diff = curr_time - previous_time
+            if time_diff > 1200:
+                actions.append(f"    page.wait_for_timeout({int(time_diff)})")
+
+        # Determine best Playwright locator
+        if el_id:
+            selector = f"#{el_id}"
+        elif name:
+            selector = f"[name='{name}']"
+        elif xpath:
+            selector = f"xpath={xpath}"
+        elif tag:
+            selector = tag
+        else:
+            selector = "body"
+
+        sel_repr = json.dumps(selector)
+
+        if ev_type == 'verification_command':
+            cmd = ev.get('command', 'verifyElementPresent')
+            v_val = ev.get('value', '')
+            val_repr = json.dumps(str(v_val))
+            if 'verifyText' in cmd or 'assertText' in cmd:
+                actions.append(f"    expect(page.locator({sel_repr})).to_have_text({val_repr})")
+            elif 'verifyValue' in cmd or 'assertValue' in cmd:
+                actions.append(f"    expect(page.locator({sel_repr})).to_have_value({val_repr})")
+            elif 'verifyVisible' in cmd or 'waitForVisible' in cmd:
+                actions.append(f"    expect(page.locator({sel_repr})).to_be_visible()")
+            elif 'verifyTitle' in cmd or 'assertTitle' in cmd:
+                actions.append(f"    expect(page).to_have_title({val_repr})")
+            else:
+                actions.append(f"    expect(page.locator({sel_repr})).to_be_attached()")
+            previous_time = curr_time
+
+        elif ev_type == 'click':
+            actions.append(f"    page.locator({sel_repr}).click()")
+            previous_time = curr_time
+
+        elif ev_type in ('change', 'input'):
+            val_repr = json.dumps(str(value) if value is not None else "")
+            if tag in ('input', 'textarea') and value is not None:
+                actions.append(f"    page.locator({sel_repr}).fill({val_repr})")
+                previous_time = curr_time
+            elif tag == 'select' and value is not None:
+                actions.append(f"    page.locator({sel_repr}).select_option({val_repr})")
+                previous_time = curr_time
+
+        elif ev_type == 'submit':
+            actions.append(f"    page.locator({sel_repr}).press('Enter')")
+            previous_time = curr_time
+
+        elif ev_type in ('pageload', 'popstate', 'hashchange'):
+            if url and url != initial_url:
+                actions.append(f"    page.goto({json.dumps(url)})")
+                previous_time = curr_time
+
+    body = "\n".join(actions) if actions else "    # No interactions recorded"
+
+    script = f'''import re
+from playwright.sync_api import Playwright, sync_playwright, expect
+
+def run(playwright: Playwright) -> None:
+    browser = playwright.chromium.launch(headless=False)
+    context = browser.new_context()
+    page = context.new_page()
+
+    # Step 1: Open starting URL
+    page.goto({json.dumps(initial_url)})
+
+    # Step 2: Replay recorded actions
+{body}
+
+    # Step 3: Finish and close
+    context.close()
+    browser.close()
+
+if __name__ == "__main__":
+    with sync_playwright() as playwright:
+        run(playwright)
+'''
+    return script
 
 
 # ==============================================================================

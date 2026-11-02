@@ -149,6 +149,11 @@ uv run playwright-recorder https://example.com
    - **Playwright script:** Every click, type, and navigation action is recorded into Playwright code in the inspector.
    - **AI Form Suggestions:** Click the extension icon in the toolbar or click **✨ Suggest Inputs (AI)** to inspect form fields and insert test values.
    - **Katalon / Combinatorial output:** You can also hit **⏺ Start Recording** in the extension popup to generate Katalon test cases concurrently.
+4. **Automatic Saving to `snapshots/` on Process End:**
+   - **`playwright_test.py`:** Fully runnable Playwright Python script generated from the session.
+   - **`playwright_trace.zip`:** Complete interactive trace (DOM, screenshots, console, network) viewable with `playwright show-trace`.
+   - **`videos/`:** Full MP4/WebM recording of the browser session.
+   - **`katalon_test.html` & `recorded_events.json`:** Standard Katalon artifacts.
 
 ---
 
@@ -187,6 +192,9 @@ html_LLM_suggester/
     └── run_<timestamp>_<id>/
         ├── recorded_events.json
         ├── katalon_test.html
+        ├── playwright_test.py      # Executable Playwright Python test script
+        ├── playwright_trace.zip    # Playwright interactive trace recording
+        ├── videos/                 # Video recording of the session
         └── generated_test_cases.csv
 ```
 

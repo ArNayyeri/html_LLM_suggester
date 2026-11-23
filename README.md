@@ -9,7 +9,7 @@ A smart web form analyzer, input suggester, and test recorder designed for **Kat
 - **Automated Form Field Extraction:** Detects all interactive `<input>`, `<textarea>`, and `<select>` elements, associating labels, placeholders, and validation constraints without overwhelming LLMs with raw HTML.
 - **Multi-Backend LLM Support:**
   - **Remote GPU Server:** Connects to any remote Ollama/OpenAI-compatible GPU endpoint (e.g., `http://<your-gpu-ip>:3000`) with dynamic IP/host and port selection.
-  - **OpenRouter Free Tier with Auto-Failover:** Automatically handles upstream rate limits (`429`) and timeouts (`503/504`) by gracefully falling back across top free models (`gemma-4`, `nemotron-3.5-lightning`, `liquid-lfm`).
+  - **OpenRouter Free Tier with Auto-Failover:** Starts with Flint and falls back to ERNIE 5.5 Flash Preview and the OpenRouter free router. Retries failed, empty, or invalid responses. Free-model availability and rate limits depend on OpenRouter.
   - **Local Ollama:** Fully offline execution on `localhost:11434`.
 - **In-Page Interactive Suggestion Modal:** Click the blue `?` button next to any field on the webpage to review, edit, regenerate with AI, or confirm test suggestions directly inside the page.
 - **Katalon Test Script Generation:** Converts recorded browser interactions into valid, well-structured Katalon Studio test tables (with guaranteed initial `open` command and user-like pause times).
@@ -203,3 +203,9 @@ html_LLM_suggester/
 ## 📄 License
 
 This project is licensed under the [MIT License](LICENSE).
+
+### OpenRouter model updates and shutdown
+
+By default, the recorder tries Flint, ERNIE 5.5 Flash Preview, then `openrouter/free`. The free router uses OpenRouter's current free-model pool. The router selects an eligible model randomly; it does not guarantee the highest-quality model. Check https://openrouter.ai/collections/free-models for current models, or choose a specific model with `--model MODEL_ID` (if it fails, the server tries the configured free models). Free models can be rate limited.
+
+After recording, close the Katalon Test Improver window to stop the recorder server. If it was started in an existing PowerShell or VS Code terminal, control returns to that terminal; the terminal itself stays open.

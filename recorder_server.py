@@ -24,6 +24,7 @@ if sys.platform == "win32":
 
 from flask import Flask, request, jsonify
 from flask_cors import CORS
+from werkzeug.serving import make_server
 from bs4 import BeautifulSoup
 from openai import OpenAI
 import tkinter as tk
@@ -39,12 +40,9 @@ DEFAULT_LOCAL_MODEL = "Llama3.2:3b"
 
 DEFAULT_OPENROUTER_URL = "https://openrouter.ai/api/v1"
 OPENROUTER_FREE_MODELS = [
-    "nvidia/nemotron-3.5-lightning:free",
-    "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free",
-    "liquid/lfm-2.5-2.6b:free",
     "recursive/flint-v1.0:free",
-    "google/gemma-4-26b-a4b-it:free",
-    "google/gemma-4-31b-it:free"
+    "baidu/ernie-5.5-flash-preview:free",
+    "openrouter/free",
 ]
 
 
@@ -146,7 +144,7 @@ gpu_host = args.gpu_host or tokens_cfg.get('gpu_host', '')
 gpu_port = args.gpu_port or tokens_cfg.get('gpu_port', DEFAULT_GPU_PORT)
 
 # Interactive configuration if run directly in terminal without CLI flags
-if not selected_mode and sys.stdin.isatty():
+if not selected_mode and __name__ == '__main__' and sys.stdin.isatty():
     print("=" * 64)
     print("   HTML LLM Suggester & Katalon Recorder Server")
     print("=" * 64)
@@ -199,7 +197,7 @@ if selected_mode == 'openrouter':
     }
     client = OpenAI(base_url=base_url, api_key=token or 'none', default_headers=extra_headers)
     print(f"\n[*] Mode: OpenRouter Free API")
-    print(f"[*] Primary Model: {active_model} (Fallbacks: {len(OPENROUTER_FREE_MODELS)-1} models)")
+    print(f"[*] Primary Model: {active_model} (fallbacks: {len(set(OPENROUTER_FREE_MODELS) - {active_model})})")
 
 elif selected_mode == 'local':
     base_url = DEFAULT_LOCAL_URL
@@ -237,20 +235,21 @@ print(f"[*] Artifacts directory: {RUN_SAVE_DIR}")
 
 # In-memory storage for user confirmed suggestions
 CONFIRMED_FIELDS = {}
+http_server = None
 
 
 # ==============================================================================
 # Resilient LLM Caller (with Free Model Failover)
 # ==============================================================================
 
-def call_llm(messages, max_tokens=1500, temperature=0.2):
+def call_llm(messages, max_tokens=1500, temperature=0.2, validator=None):
     """
     Executes a chat completion call with automatic model failover.
-    For OpenRouter, if a free model is rate-limited (429) or busy (503/504),
-    it dynamically tries the next free model in OPENROUTER_FREE_MODELS.
+    OpenRouter tries the next free model after an API error, empty response,
+    or response rejected by the optional validator.
     """
     if selected_mode == 'openrouter':
-        models_to_try = [active_model] + [m for m in OPENROUTER_FREE_MODELS if m != active_model]
+        models_to_try = list(dict.fromkeys([active_model, *OPENROUTER_FREE_MODELS]))
         last_error = None
         for m in models_to_try:
             try:
@@ -258,16 +257,19 @@ def call_llm(messages, max_tokens=1500, temperature=0.2):
                     model=m,
                     messages=messages,
                     temperature=temperature,
-                    max_tokens=max_tokens
+                    max_tokens=max(max_tokens, 4096) if validator else max_tokens
                 )
                 msg = res.choices[0].message
-                raw_text = msg.content or getattr(msg, 'reasoning_content', '') or ''
-                return raw_text.strip()
+                raw_text = (msg.content or '').strip()
+                if not raw_text:
+                    raise ValueError(f"empty response (finish_reason={res.choices[0].finish_reason})")
+                if validator:
+                    validator(raw_text)
+                return raw_text
             except Exception as e:
                 err_str = str(e)
-                print(f"[!] OpenRouter model '{m}' failed ({err_str[:80]}), trying next free model...")
+                print(f"[!] OpenRouter model '{m}' failed ({err_str[:80]}), trying another free model...")
                 last_error = e
-                time.sleep(0.8)
         raise RuntimeError(f"All OpenRouter free models failed: {last_error}")
 
     else:
@@ -279,8 +281,12 @@ def call_llm(messages, max_tokens=1500, temperature=0.2):
             max_tokens=max_tokens
         )
         msg = res.choices[0].message
-        raw_text = msg.content or getattr(msg, 'reasoning_content', '') or ''
-        return raw_text.strip()
+        raw_text = (msg.content or '').strip()
+        if not raw_text:
+            raise ValueError('LLM returned an empty response')
+        if validator:
+            validator(raw_text)
+        return raw_text
 
 
 # ==============================================================================
@@ -340,6 +346,20 @@ def clean_llm_json(raw_text):
         return items
 
     raise ValueError(f"Could not parse valid JSON from LLM response:\n{raw_text[:300]}")
+
+
+def validate_suggestions(raw_text):
+    """Reject unusable completions so OpenRouter can try another model."""
+    items = clean_llm_json(raw_text)
+    if not isinstance(items, list) or not items:
+        raise ValueError("LLM returned no suggestion objects")
+    for item in items:
+        if not isinstance(item, dict) or not isinstance(item.get('range'), str):
+            raise ValueError("LLM returned an invalid suggestion object")
+        for key in ('examples', 'bad_examples'):
+            if not isinstance(item.get(key), list) or not item[key] or not all(isinstance(x, str) for x in item[key]):
+                raise ValueError(f"LLM returned invalid {key}")
+    return items
 
 
 def extract_form_fields(html):
@@ -412,7 +432,8 @@ def extract_form_fields(html):
             'label': label,
             'placeholder': placeholder,
             'options': options,
-            'page_title': page_title
+            'page_title': page_title,
+            'constraints': {key: el.get(key) for key in ('required', 'minlength', 'maxlength', 'min', 'max', 'pattern') if el.has_attr(key)}
         })
 
     return fields
@@ -436,27 +457,36 @@ For EACH input field in the list above, output ONE JSON object in an array:
 - id: exact 'id' from the field above
 - name: exact 'name' from the field above
 - type: 'type' from the field above
-- range: validation rules, constraints, or search guidelines written in Persian (فارسی). (e.g. 'حداکثر ۲۵۵ کاراکتر، متن جستجو').
+- range: describe only known constraints from field metadata, in Persian. If unknown, say they are unknown; never invent a maximum length or claim a search term is invalid.
 - examples: 5 realistic, valid test values that would be accepted by the form.
-- bad_examples: 5 invalid or boundary values for negative testing (empty, boundary overflow, special characters, SQLi/XSS test inputs).
+- bad_examples: 5 distinct actual input strings to test edge cases relevant to this field. For search, use empty string, whitespace-only, a nonsensical query, punctuation-only, and a long repeated string; do not assume these are invalid or use SQL injection or XSS payloads by default. Represent actual values, not descriptions or placeholders. No embedded line breaks.
 
 Return ONLY a valid JSON array of objects with exactly {len(fields)} item(s). No explanations, no markdown comments."""
 
+    def validate_fields(raw_text):
+        items = validate_suggestions(raw_text)
+        expected = {field['id'] for field in fields}
+        if len(items) != len(fields) or {item.get('id') for item in items} != expected:
+            raise ValueError("LLM did not return exactly one suggestion for each field")
+        return items
+
     try:
-        raw_output = call_llm([{"role": "user", "content": prompt}], max_tokens=2000, temperature=0.2)
-        parsed = clean_llm_json(raw_output)
+        raw_output = call_llm([{"role": "user", "content": prompt}], max_tokens=2000, temperature=0.2, validator=validate_fields)
+        parsed = validate_fields(raw_output)
 
         # Validate and align with DOM fields
         results = []
-        for i, item in enumerate(parsed):
-            target_field = fields[i] if i < len(fields) else fields[0]
+        fields_by_id = {field['id']: field for field in fields}
+        for item in parsed:
+            target_field = fields_by_id[item['id']]
             field_id = item.get('id') or target_field['id']
             field_name = item.get('name') or target_field['name']
 
             results.append({
                 'id': field_id,
                 'name': field_name,
-                'type': item.get('type') or target_field['type'],
+                'type': target_field['type'],
+                'label': target_field.get('label', ''),
                 'range': item.get('range') or item.get('limitations') or 'قوانین اعتبارسنجی پیش‌فرض',
                 'examples': item.get('examples') or [f"تست {j+1}" for j in range(5)],
                 'bad_examples': item.get('bad_examples') or ["", "   ", "1234567890", "<script>alert(1)</script>", "!@#$%^"]
@@ -465,18 +495,7 @@ Return ONLY a valid JSON array of objects with exactly {len(fields)} item(s). No
 
     except Exception as e:
         print(f"Error in generate_field_suggestions: {e}")
-        # Deterministic fallback so the extension NEVER breaks
-        fallback_results = []
-        for f in fields:
-            fallback_results.append({
-                'id': f['id'],
-                'name': f['name'],
-                'type': f['type'],
-                'range': f"فیلد {f['label']} - متن ورودی معتبر",
-                'examples': [f"نمونه {i+1} برای {f['label']}" for i in range(5)],
-                'bad_examples': ["", "   ", "<script>", "' OR '1'='1", "A" * 300]
-            })
-        return fallback_results
+        raise
 
 
 # ==============================================================================
@@ -574,11 +593,13 @@ def update_input_suggestion():
         data = request.get_json(force=True)
         field = data.get('field', 'field')
         range_ = data.get('range', '')
+        field_type = data.get('field_type', '')
+        field_label = data.get('field_label', '')
         examples_ = data.get('examples', [])
         bad_examples_ = data.get('bad_examples', [])
 
         prompt = f"""You are a test automation expert.
-A QA tester is refining test values for a form field named '{field}'.
+A QA tester is refining test values for a form field named '{field}', type '{field_type}', label '{field_label}'.
 Current validation rules / range description:
 {range_}
 
@@ -586,7 +607,7 @@ Existing user provided examples:
 Good: {json.dumps(examples_, ensure_ascii=False)}
 Bad: {json.dumps(bad_examples_, ensure_ascii=False)}
 
-Please generate an improved description of the range (in Persian), exactly 5 high quality realistic GOOD examples, and 5 BAD (invalid/negative) examples.
+Generate a range description in Persian using only known constraints; state when constraints are unknown. Generate 5 realistic GOOD examples and 5 distinct actual edge-case input strings. For search inputs, include empty, whitespace-only, nonsensical, punctuation-only and long repeated input; do not claim these are invalid, and do not use SQL injection or XSS payloads by default. Do not use descriptions as values or embedded line breaks.
 Return ONLY a JSON object:
 {{
   "range": "توضیح قوانین به فارسی",
@@ -594,8 +615,8 @@ Return ONLY a JSON object:
   "bad_examples": ["bad1", "bad2", "bad3", "bad4", "bad5"]
 }}"""
 
-        raw_output = call_llm([{"role": "user", "content": prompt}], max_tokens=800, temperature=0.3)
-        parsed = clean_llm_json(raw_output)
+        raw_output = call_llm([{"role": "user", "content": prompt}], max_tokens=2000, temperature=0.3, validator=validate_suggestions)
+        parsed = validate_suggestions(raw_output)
         if isinstance(parsed, list) and parsed:
             parsed = parsed[0]
 
@@ -1026,8 +1047,8 @@ class KatalonTestImprover:
     def on_closing(self):
         try:
             self.root.destroy()
-        except Exception:
-            pass
+        finally:
+            request_server_shutdown()
 
     def setup_ui(self):
         main_frame = ttk.Frame(self.root)
@@ -1192,10 +1213,17 @@ def generate_test_cases_endpoint():
         return jsonify({'error': str(e)}), 500
 
 
+def request_server_shutdown():
+    """Stop the server after the assistant window is closed."""
+    if http_server is not None:
+        print("[*] Stopping recorder server.")
+        threading.Thread(target=http_server.shutdown, daemon=True).start()
+
+
 @app.route('/shutdown', methods=['POST'])
 def shutdown():
     print("[*] Shutdown request received.")
-    threading.Thread(target=lambda: (time.sleep(0.5), os._exit(0))).start()
+    request_server_shutdown()
     return 'Server shutting down...'
 
 
@@ -1207,6 +1235,10 @@ if __name__ == '__main__':
     print(f"\n[+] Server listening on http://localhost:{server_port}")
     print("[+] Ready for Chrome Extension requests.\n")
     try:
-        app.run(host='127.0.0.1', port=server_port, debug=False)
+        http_server = make_server('127.0.0.1', server_port, app, threaded=True)
+        http_server.serve_forever()
     except KeyboardInterrupt:
         print("\n[*] Server stopped by user.")
+    finally:
+        if http_server is not None:
+            http_server.server_close()

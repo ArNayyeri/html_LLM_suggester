@@ -304,8 +304,14 @@
     const fieldTitle = item.name || item.id || 'فیلد ورودی';
     const fieldType = item.type || 'text';
     const rangeVal = item.range || '';
-    const examplesVal = (item.examples || []).join('\n');
-    const badExamplesVal = (item.bad_examples || []).join('\n');
+    // JSON strings make empty and whitespace-only values visible and editable.
+    const formatExamples = values => (values || []).map(value => JSON.stringify(value)).join('\n');
+    const parseExamples = text => text.split('\n').filter(line => line.trim() !== '').map(line => {
+      try {
+        const value = JSON.parse(line);
+        return typeof value === 'string' ? value : line;
+      } catch (_) { return line; }
+    });
 
     modal.innerHTML = `
       <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #dee2e6; padding-bottom: 10px; margin-bottom: 16px;">
@@ -318,17 +324,17 @@
 
       <div style="margin-bottom: 14px;">
         <label style="display: block; font-weight: bold; margin-bottom: 6px; font-size: 13px; color: #333;">قوانین اعتبارسنجی (محدوده فیلد):</label>
-        <textarea id="modal-range" style="width: 100%; height: 60px; padding: 8px 10px; border: 1px solid #ced4da; border-radius: 6px; font-size: 13px; box-sizing: border-box; resize: vertical; direction: rtl;">${rangeVal}</textarea>
+        <textarea id="modal-range" style="width: 100%; height: 60px; padding: 8px 10px; border: 1px solid #ced4da; border-radius: 6px; font-size: 13px; box-sizing: border-box; resize: vertical; direction: rtl;"></textarea>
       </div>
 
       <div style="margin-bottom: 14px;">
         <label style="display: block; font-weight: bold; margin-bottom: 6px; font-size: 13px; color: #198754;">مثال‌های معتبر و صحیح (هر مورد در یک خط):</label>
-        <textarea id="modal-examples" style="width: 100%; height: 100px; padding: 8px 10px; border: 1px solid #198754; border-radius: 6px; font-size: 13px; box-sizing: border-box; resize: vertical; direction: ltr; text-align: left;">${examplesVal}</textarea>
+        <textarea id="modal-examples" style="width: 100%; height: 100px; padding: 8px 10px; border: 1px solid #198754; border-radius: 6px; font-size: 13px; box-sizing: border-box; resize: vertical; direction: ltr; text-align: left;"></textarea>
       </div>
 
       <div style="margin-bottom: 18px;">
-        <label style="display: block; font-weight: bold; margin-bottom: 6px; font-size: 13px; color: #dc3545;">مثال‌های نامعتبر / تست منفی (هر مورد در یک خط):</label>
-        <textarea id="modal-bad-examples" style="width: 100%; height: 90px; padding: 8px 10px; border: 1px solid #dc3545; border-radius: 6px; font-size: 13px; box-sizing: border-box; resize: vertical; background: #fff8f8; direction: ltr; text-align: left;">${badExamplesVal}</textarea>
+        <label style="display: block; font-weight: bold; margin-bottom: 6px; font-size: 13px; color: #dc3545;">ورودی‌های مرزی / تست منفی (هر مورد در یک خط؛ متن خالی: &quot;&quot;):</label>
+        <textarea id="modal-bad-examples" style="width: 100%; height: 90px; padding: 8px 10px; border: 1px solid #dc3545; border-radius: 6px; font-size: 13px; box-sizing: border-box; resize: vertical; background: #fff8f8; direction: ltr; text-align: left;"></textarea>
       </div>
 
       <div id="modal-status-msg" style="margin-bottom: 12px; font-size: 13px; display: none;"></div>
@@ -341,7 +347,17 @@
     `;
 
     overlay.appendChild(modal);
+    for (const textarea of modal.querySelectorAll('textarea')) {
+      const background = textarea.id === 'modal-bad-examples' ? '#fff8f8' : '#ffffff';
+      textarea.style.setProperty('color-scheme', 'light', 'important');
+      textarea.style.setProperty('background-color', background, 'important');
+      textarea.style.setProperty('color', '#212529', 'important');
+      textarea.style.setProperty('-webkit-text-fill-color', 'currentColor', 'important');
+    }
     document.body.appendChild(overlay);
+    document.getElementById('modal-range').value = rangeVal;
+    document.getElementById('modal-examples').value = formatExamples(item.examples);
+    document.getElementById('modal-bad-examples').value = formatExamples(item.bad_examples);
 
     function closeModal() {
       overlay.remove();
@@ -354,8 +370,8 @@
     // Confirm button: saves to server (/confirm_suggestion) and updates ? button state
     document.getElementById('modal-confirm-btn').onclick = function () {
       const confirmedRange = document.getElementById('modal-range').value.trim();
-      const confirmedExamples = document.getElementById('modal-examples').value.split('\n').map(s => s.trim()).filter(Boolean);
-      const confirmedBad = document.getElementById('modal-bad-examples').value.split('\n').map(s => s.trim()).filter(Boolean);
+      const confirmedExamples = parseExamples(document.getElementById('modal-examples').value);
+      const confirmedBad = parseExamples(document.getElementById('modal-bad-examples').value);
 
       const confirmBtn = document.getElementById('modal-confirm-btn');
       confirmBtn.disabled = true;
@@ -402,27 +418,33 @@
       updateBtn.textContent = 'در حال پردازش با هوش مصنوعی...';
 
       const currentRange = document.getElementById('modal-range').value.trim();
-      const currentExamples = document.getElementById('modal-examples').value.split('\n').map(s => s.trim()).filter(Boolean);
-      const currentBad = document.getElementById('modal-bad-examples').value.split('\n').map(s => s.trim()).filter(Boolean);
+      const currentExamples = parseExamples(document.getElementById('modal-examples').value);
+      const currentBad = parseExamples(document.getElementById('modal-bad-examples').value);
 
       fetch('http://localhost:5000/update_input_suggestion', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           field: item.id || item.name,
+          field_type: item.type || '',
+          field_label: item.label || '',
           range: currentRange,
           examples: currentExamples,
           bad_examples: currentBad
         })
       })
-      .then(res => res.json())
+      .then(async res => {
+        const data = await res.json();
+        if (!res.ok || data.error) throw new Error(data.error || `HTTP ${res.status}`);
+        return data;
+      })
       .then(data => {
         updateBtn.disabled = false;
         updateBtn.textContent = 'تولید مجدد با AI';
 
         if (data.range) document.getElementById('modal-range').value = data.range;
-        if (data.new_examples) document.getElementById('modal-examples').value = data.new_examples.join('\n');
-        if (data.new_bad_examples) document.getElementById('modal-bad-examples').value = data.new_bad_examples.join('\n');
+        if (data.new_examples) document.getElementById('modal-examples').value = formatExamples(data.new_examples);
+        if (data.new_bad_examples) document.getElementById('modal-bad-examples').value = formatExamples(data.new_bad_examples);
 
         const msg = document.getElementById('modal-status-msg');
         msg.style.display = 'block';
